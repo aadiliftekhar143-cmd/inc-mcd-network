@@ -14,11 +14,10 @@ jobs:
         with: { gradle-version: '8.7' }
       - name: Build Release APK
         run: |
-          chmod +x gradlew
           if [ -n "${{ secrets.WS_API_URL }}" ]; then
-            ./gradlew assembleRelease -PWS_API_URL="${{ secrets.WS_API_URL }}" -PWS_ANON_KEY="${{ secrets.WS_ANON_KEY }}"
+            gradle assembleRelease -PWS_API_URL="${{ secrets.WS_API_URL }}" -PWS_ANON_KEY="${{ secrets.WS_ANON_KEY }}"
           else
-            ./gradlew assembleRelease
+            gradle assembleRelease
           fi
       - uses: actions/upload-artifact@v4
         with: { name: ward-sadasya-apk, path: android/app/build/outputs/apk/release/*.apk }
