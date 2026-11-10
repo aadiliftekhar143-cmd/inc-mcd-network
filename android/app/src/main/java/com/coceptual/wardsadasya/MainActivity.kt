@@ -146,66 +146,162 @@ private fun LoginScreen(onDone: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var helpline by remember { mutableStateOf<String?>(null) }
+    var foundMember by remember { mutableStateOf<JSONObject?>(null) }
+    var token by remember { mutableStateOf<String?>(null) }
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
         Column(
-            Modifier.fillMaxWidth().background(Navy).padding(start = 28.dp, end = 28.dp, top = 64.dp, bottom = 36.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            Modifier.fillMaxWidth().background(Navy).padding(start = 28.dp, end = 28.dp, top = 56.dp, bottom = 30.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Image(
                 painterResource(R.drawable.logo), contentDescription = "कांग्रेस पार्टी चिह्न",
-                modifier = Modifier.size(76.dp).clip(CircleShape).background(Color.White), contentScale = ContentScale.Fit,
+                modifier = Modifier.size(72.dp).clip(CircleShape).background(Color.White), contentScale = ContentScale.Fit,
             )
-            Text("वार्ड सदस्य", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            Text("पार्टी के वार्ड सदस्यों के लिए", color = Color(0xFFC9D2E3), fontSize = 16.sp)
+            Text("वार्ड सदस्य", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            Text("दिल्ली प्रदेश कांग्रेस कमेटी", color = Color(0xFFC9D2E3), fontSize = 15.sp)
         }
-        Column(Modifier.padding(28.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Text("अपना मोबाइल नंबर डालें", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-            OutlinedTextField(
-                value = mobile,
-                onValueChange = { v -> mobile = v.filter { it.isDigit() }.take(10); error = null },
-                prefix = { Text("+91  ") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                textStyle = LocalTextStyle.current.copy(fontSize = 20.sp),
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Text("वही 10 अंकों का नंबर जो आपने वार्ड आवेदन में दिया था।", color = Muted, fontSize = 14.sp)
-            Button(
-                onClick = {
-                    busy = true; error = null
-                    scope.launch {
-                        try {
-                            val r = Api.call(ctx, "login", JSONObject().put("mobile", mobile))
-                            Store.setToken(ctx, r.getString("token"))
-                            onDone()
-                        } catch (e: ApiError) {
-                            error = if (e.code == "not_registered") "यह नंबर रजिस्टर नहीं है।" else "नंबर सही नहीं है।"
-                            helpline = e.body.optString("helpline").ifBlank { null }
-                        } catch (e: Exception) {
-                            error = "इंटरनेट चेक करें और फिर कोशिश करें।"
+
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            if (foundMember == null) {
+                Text("अपना मोबाइल नंबर दर्ज करें", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    "अपना 10 अंकों का मोबाइल नंबर डालें। यदि आपका विवरण रिकॉर्ड में उपलब्ध है, तो वह नीचे दिखाई देगा।",
+                    color = Muted, fontSize = 14.sp, lineHeight = 20.sp,
+                )
+
+                OutlinedTextField(
+                    value = mobile,
+                    onValueChange = { v ->
+                        mobile = v.filter { it.isDigit() }.take(10)
+                        error = null
+                        foundMember = null
+                    },
+                    prefix = { Text("+91  ", fontWeight = FontWeight.SemiBold) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    textStyle = LocalTextStyle.current.copy(fontSize = 20.sp, fontWeight = FontWeight.Bold),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                )
+
+                Button(
+                    onClick = {
+                        busy = true
+                        error = null
+                        scope.launch {
+                            try {
+                                val r = Api.call(ctx, "login", JSONObject().put("mobile", mobile))
+                                token = r.getString("token")
+                                foundMember = r.getJSONObject("member")
+                            } catch (e: ApiError) {
+                                error = if (e.code == "not_registered") "यह नंबर सूची में नहीं मिला।" else "मोबाइल नंबर सही नहीं है।"
+                                helpline = e.body.optString("helpline").ifBlank { null }
+                            } catch (e: Exception) {
+                                error = "इंटरनेट चेक करें और फिर कोशिश करें।"
+                            }
+                            busy = false
                         }
-                        busy = false
-                    }
-                },
-                enabled = mobile.length == 10 && !busy,
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                shape = RoundedCornerShape(12.dp),
-            ) { Text(if (busy) "रुकिए…" else "लॉगिन करें", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
-            error?.let {
-                Column(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(OrangeBg).padding(14.dp),
+                    },
+                    enabled = mobile.length == 10 && !busy,
+                    modifier = Modifier.fillMaxWidth().height(54.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Blue),
                 ) {
-                    Text(it, color = OrangeText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                    helpline?.let { h ->
+                    Text(if (busy) "जांच हो रही है…" else "विवरण देखें", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                }
+
+                error?.let {
+                    Column(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(OrangeBg).padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(it, color = OrangeText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                         Text(
-                            "मदद के लिए कॉल करें: $h", color = OrangeText, fontSize = 14.sp,
-                            modifier = Modifier.padding(top = 4.dp).clickable { openLink(ctx, "tel:$h") },
+                            "यदि आपका नंबर एडमिन द्वारा अभी तक नहीं जोड़ा गया है, तो कृपया सहायता के लिए कॉल करें:",
+                            color = OrangeText, fontSize = 13.sp,
+                        )
+                        helpline?.let { h ->
+                            OutlinedButton(
+                                onClick = { openLink(ctx, "tel:$h") },
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = OrangeText),
+                                border = BorderStroke(1.dp, Orange),
+                            ) {
+                                Text("📞  हेल्पलाइन पर कॉल करें: $h", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                        }
+                    }
+                }
+            } else {
+                val m = foundMember!!
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color(0xFFF0FDF4))
+                        .border(1.5.dp, Green, RoundedCornerShape(16.dp)).padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier.size(36.dp).clip(CircleShape).background(GreenBg),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Filled.Check, null, tint = Green)
+                        }
+                        Text(
+                            "  सदस्य विवरण मिल गया",
+                            color = GreenText, fontSize = 16.sp, fontWeight = FontWeight.Bold,
                         )
                     }
+
+                    HorizontalDivider(color = Color(0xFFBBF7D0))
+
+                    ProfileField("नाम", m.optString("name"))
+                    val wardName = m.optString("ward_name").takeIf { it.isNotBlank() && it != "null" }
+                    ProfileField("वार्ड", "वार्ड ${m.optInt("ward_no")}" + (wardName?.let { " ($it)" } ?: ""))
+                    val zone = m.optString("zone").takeIf { it.isNotBlank() && it != "null" }
+                    if (zone != null) ProfileField("ज़ोन", zone)
+                    val ac = m.optString("assembly").takeIf { it.isNotBlank() && it != "null" }
+                    if (ac != null) ProfileField("विधानसभा", ac)
+                    ProfileField("मोबाइल", "+91 $mobile")
+                }
+
+                Button(
+                    onClick = {
+                        token?.let {
+                            Store.setToken(ctx, it)
+                            onDone()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Green),
+                ) {
+                    Text("आगे बढ़ें  ➔", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
+
+                TextButton(
+                    onClick = {
+                        foundMember = null
+                        token = null
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("दूसरा नंबर डालें", color = Muted, fontSize = 14.sp)
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ProfileField(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, color = Muted, fontSize = 14.sp)
+        Text(value, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -264,7 +360,7 @@ private fun HomeScreen(refreshKey: Int, onTask: (JSONObject) -> Unit, onMessages
                     )
                 }
                 IconButton(onClick = { reload++ }) { Icon(Icons.Filled.Refresh, "रीफ्रेश", tint = Color.White) }
-                IconButton(onClick = onLogout) { Icon(Icons.Filled.Logout, "लॉग आउट", tint = Color.White) }
+                IconButton(onClick = onLogout) { Icon(Icons.Filled.Logout, "नंबर बदलें", tint = Color.White) }
             }
             if (uploadTasks.isNotEmpty()) {
                 Column(
