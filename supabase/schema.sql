@@ -111,6 +111,22 @@ create table if not exists admins (
   label   text
 );
 
+-- Automatically promote newly created Supabase Auth users to admins
+create or replace function public.handle_new_admin_user()
+returns trigger as $$
+begin
+  insert into public.admins (user_id, label)
+  values (new.id, new.email)
+  on conflict (user_id) do nothing;
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists on_auth_user_created_admin on auth.users;
+create trigger on_auth_user_created_admin
+  after insert on auth.users
+  for each row execute procedure public.handle_new_admin_user();
+
 create or replace function is_admin() returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (select 1 from admins where user_id = auth.uid());
