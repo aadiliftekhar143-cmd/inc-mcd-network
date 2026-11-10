@@ -1,0 +1,39 @@
+# Supabase CLI cache
+supabase/.temp/
+
+# Dependencies
+node_modules/
+
+# Production builds
+dist/
+build/
+admin/dist/
+android/app/build/
+android/build/
+android/.gradle/
+
+# Environment files (never commit real credentials)
+.env
+.env.local
+.env.*.local
+admin/.env
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE and Editor files
+.idea/
+*.iml
+.vscode/
+
+# Android local and signing keys
+android/local.properties
+*.jks
+*.keystore
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

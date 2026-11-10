@@ -1,0 +1,48 @@
+#!/bin/sh
+
+# Attempt to locate JAVA_HOME
+if [ -n "$JAVA_HOME" ] ; then
+    JAVACMD="$JAVA_HOME/bin/java"
+else
+    JAVACMD="java"
+fi
+
+# Determine the project directory
+PRG="$0"
+while [ -h "$PRG" ] ; do
+    ls=`ls -ld "$PRG"`
+    link=`expr "$ls" : '.*-> \(.*\)$'`
+    if expr "$link" : '/.*' > /dev/null; then
+        PRG="$link"
+    else
+        PRG=`dirname "$PRG"`"/$link"
+    fi
+done
+APP_HOME=`dirname "$PRG"`
+APP_HOME=`cd "$APP_HOME" && pwd`
+
+WRAPPER_JAR="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
+
+# If gradle-wrapper.jar is missing, try downloading it or fallback to system gradle
+if [ ! -f "$WRAPPER_JAR" ]; then
+    if command -v gradle >/dev/null 2>&1; then
+        exec gradle "$@"
+    fi
+    echo "gradle-wrapper.jar not found, attempting to download..."
+    mkdir -p "$APP_HOME/gradle/wrapper"
+    JAR_URL="https://raw.githubusercontent.com/gradle/gradle/v8.7.0/gradle/wrapper/gradle-wrapper.jar"
+    if command -v curl >/dev/null 2>&1; then
+        curl -sSL "$JAR_URL" -o "$WRAPPER_JAR"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO "$WRAPPER_JAR" "$JAR_URL"
+    fi
+fi
+
+if [ ! -f "$WRAPPER_JAR" ]; then
+    echo "ERROR: Could not find or download gradle-wrapper.jar."
+    echo "Please open this project in Android Studio to generate the Gradle wrapper, or install Gradle."
+    exit 1
+fi
+
+exec "$JAVACMD" -Xmx64m -Dfile.encoding=UTF-8 -jar "$WRAPPER_JAR" "$@"
+

@@ -1,0 +1,54 @@
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+
+android {
+    namespace = "com.coceptual.wardsadasya"
+    compileSdk = 34
+
+    defaultConfig {
+        applicationId = "com.coceptual.wardsadasya"
+        minSdk = 24
+        targetSdk = 34
+        versionCode = 1
+        versionName = "1.0"
+        buildConfigField("String", "API_URL", "\"${project.findProperty("WS_API_URL")}\"")
+        buildConfigField("String", "ANON_KEY", "\"${project.findProperty("WS_ANON_KEY")}\"")
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            // Debug key is fine for a WhatsApp-shared APK. Keep the same machine/key for updates.
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = "17" }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = false
+    }
+    composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
+}
+
+dependencies {
+    val bom = platform("androidx.compose:compose-bom:2024.06.00")
+    implementation(bom)
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.activity:activity-compose:1.9.0")
+    implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.2")
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+}
