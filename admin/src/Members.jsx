@@ -34,10 +34,12 @@ export default function Members() {
         const name = String(pick(r, ['name', 'नाम']) ?? '').trim();
         const ward_no = parseInt(String(pick(r, ['ward', 'ward no', 'ward_no', 'ward number', 'वार्ड']) ?? '').replace(/\D/g, ''), 10);
         if (!/^[6-9]\d{9}$/.test(mobile) || !name || !(ward_no >= 1 && ward_no <= 250)) { bad.push(i + 2); return; }
+        const distVal = String(pick(r, ['district', 'district name', 'dist', 'ज़िला', 'जिला', 'zone', 'mcd zone', 'ज़ोन', 'जोन']) ?? '').trim() || null;
         good.push({
           mobile, name, ward_no,
           ward_name: String(pick(r, ['ward name', 'ward_name']) ?? '').trim() || null,
-          zone: String(pick(r, ['zone', 'mcd zone', 'ज़ोन', 'जोन']) ?? '').trim() || null,
+          district: distVal,
+          zone: distVal,
           assembly: String(pick(r, ['assembly', 'ac', 'vidhan sabha', 'विधानसभा']) ?? '').trim() || null,
         });
       });
@@ -55,13 +57,13 @@ export default function Members() {
   };
 
   const template = () => {
-    const ws = XLSX.utils.aoa_to_sheet([['name', 'mobile', 'ward', 'ward name', 'zone', 'assembly'], ['Ramesh Kumar', '9876543210', 17, '', 'Central', '']]);
+    const ws = XLSX.utils.aoa_to_sheet([['name', 'mobile', 'ward', 'ward name', 'district', 'assembly'], ['Ramesh Kumar', '9876543210', 17, '', 'Central', '']]);
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'members');
     XLSX.writeFile(wb, 'ward-members-template.xlsx');
   };
 
   const exportAll = () => {
-    const ws = XLSX.utils.json_to_sheet(members.map((m) => ({ name: m.name, mobile: m.mobile, ward: m.ward_no, zone: m.zone, assembly: m.assembly, logged_in: m.first_login_at ? 'yes' : 'no', tasks_done: m.tasks_done, videos: m.videos, last_active: m.last_active_at })));
+    const ws = XLSX.utils.json_to_sheet(members.map((m) => ({ name: m.name, mobile: m.mobile, ward: m.ward_no, district: m.district || m.zone, assembly: m.assembly, logged_in: m.first_login_at ? 'yes' : 'no', tasks_done: m.tasks_done, videos: m.videos, last_active: m.last_active_at })));
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'members');
     XLSX.writeFile(wb, 'ward-members-report.xlsx');
   };
@@ -92,7 +94,7 @@ export default function Members() {
       <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
         <div>
           <h2>Ward members · {fmt(members.length)}</h2>
-          <p className="sub">Excel columns: name, mobile, ward (1 to 250). Optional: ward name, zone, assembly. Re-uploading updates existing numbers.</p>
+          <p className="sub">Excel columns: name, mobile, ward (1 to 250). Optional: ward name, district, assembly. Re-uploading updates existing numbers.</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn ghost" onClick={template}>Download template</button>
@@ -131,7 +133,7 @@ export default function Members() {
               <th>Name</th>
               <th>Mobile</th>
               <th>Ward</th>
-              <th>Zone</th>
+              <th>District</th>
               <th>App login</th>
               <th>Status</th>
               <th>Tasks done</th>
@@ -146,7 +148,7 @@ export default function Members() {
                 <td><b>{m.name}</b></td>
                 <td>{m.mobile}</td>
                 <td>{wardLabel(m.ward_no)}</td>
-                <td className="muted">{m.zone || '–'}</td>
+                <td className="muted">{m.district || m.zone || '–'}</td>
                 <td><span className={'tag ' + (m.first_login_at ? 'ok' : 'no')}>{m.first_login_at ? 'Logged in' : 'Not yet'}</span></td>
                 <td><span className={'tag ' + (m.active !== false ? 'ok' : 'no')}>{m.active !== false ? 'Active' : 'Blocked'}</span></td>
                 <td>{m.tasks_done}</td>

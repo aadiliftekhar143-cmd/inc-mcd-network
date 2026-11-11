@@ -273,8 +273,9 @@ private fun LoginScreen(onDone: () -> Unit) {
                     ProfileField("नाम", m.optString("name"))
                     val wardName = m.optString("ward_name").takeIf { it.isNotBlank() && it != "null" }
                     ProfileField("वार्ड", "वार्ड ${m.optInt("ward_no")}" + (wardName?.let { " ($it)" } ?: ""))
-                    val zone = m.optString("zone").takeIf { it.isNotBlank() && it != "null" }
-                    if (zone != null) ProfileField("ज़ोन", zone)
+                    val district = (m.optString("district").takeIf { it.isNotBlank() && it != "null" }
+                        ?: m.optString("zone").takeIf { it.isNotBlank() && it != "null" })
+                    if (district != null) ProfileField("ज़िला (District)", district)
                     val ac = m.optString("assembly").takeIf { it.isNotBlank() && it != "null" }
                     if (ac != null) ProfileField("विधानसभा", ac)
                     ProfileField("मोबाइल", "+91 $mobile")
@@ -364,9 +365,10 @@ private fun HomeScreen(refreshKey: Int, onTask: (JSONObject) -> Unit, onMessages
             Row(verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f)) {
                     Text("नमस्ते, ${member.optString("name")} जी", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    val zone = member.optString("zone").takeIf { it.isNotBlank() && it != "null" }
+                    val district = (member.optString("district").takeIf { it.isNotBlank() && it != "null" }
+                        ?: member.optString("zone").takeIf { it.isNotBlank() && it != "null" })
                     Text(
-                        "वार्ड ${member.optInt("ward_no")}" + (zone?.let { " · $it" } ?: ""),
+                        "वार्ड ${member.optInt("ward_no")}" + (district?.let { " · $it" } ?: ""),
                         color = Color(0xFFC9D2E3), fontSize = 14.sp,
                     )
                 }

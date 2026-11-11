@@ -35,19 +35,19 @@ def main():
     out_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     out_file = os.path.join(out_dir, "delhi_250_wards_members_template.csv")
 
-    headers = ["name", "mobile", "ward", "ward name", "zone", "assembly"]
+    headers = ["name", "mobile", "ward", "ward name", "district", "assembly"]
     rows = []
 
     # Generate 5 member slots per ward by default (total 1,250 - 1,400 members)
     for ward_no in range(1, 251):
-        zone = get_zone(ward_no)
+        district = get_zone(ward_no)
         for slot in range(1, 6):
             rows.append({
                 "name": f"Ward {ward_no} Member {slot}",
                 "mobile": f"9800{ward_no:03d}{slot:02d}",
                 "ward": ward_no,
                 "ward name": f"Ward {ward_no}",
-                "zone": zone,
+                "district": district,
                 "assembly": "",
             })
 

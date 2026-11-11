@@ -187,7 +187,8 @@ Deno.serve(async (req) => {
       const { data: ann } = await db.from("announcements").select("*").gt("created_at", since).order("created_at");
       const mine = (ann ?? []).filter((a) =>
         (a.ward_no == null || a.ward_no === member.ward_no) &&
-        (a.zone == null || String(a.zone).trim().toLowerCase() === String(member.zone ?? "").trim().toLowerCase()) &&
+        ((!a.district && !a.zone) ||
+         String(a.district || a.zone || "").trim().toLowerCase() === String(member.district || member.zone || "").trim().toLowerCase()) &&
         (!a.only_pending || pending > 0));
       const { data: msg } = await db.from("leader_messages").select("id, title, published_at")
         .gt("published_at", since).lte("published_at", new Date().toISOString()).order("published_at", { ascending: false }).limit(1);

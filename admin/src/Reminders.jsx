@@ -35,7 +35,7 @@ export default function Reminders() {
 
   const send = async (e) => {
     e.preventDefault();
-    const row = { body, only_pending: target === 'pending', ward_no: target === 'ward' ? Number(ward) : null, zone: target === 'zone' ? zone : null };
+    const row = { body, only_pending: target === 'pending', ward_no: target === 'ward' ? Number(ward) : null, district: target === 'zone' ? zone : null, zone: target === 'zone' ? zone : null };
     await supabase.from('announcements').insert(row);
     setBody(''); load();
   };
@@ -51,11 +51,11 @@ export default function Reminders() {
               <option value="all">Everyone</option>
               <option value="pending">Only members with pending tasks today</option>
               <option value="ward">One ward</option>
-              <option value="zone">One zone</option>
+              <option value="zone">One district</option>
             </select>
           </label>
           {target === 'ward' && <label>Ward<select value={ward} onChange={(e) => setWard(e.target.value)}>{Array.from({ length: 250 }, (_, i) => <option key={i + 1} value={i + 1}>{wardLabel(i + 1)}</option>)}</select></label>}
-          {target === 'zone' && <label>Zone name (as in the Excel)<input type="text" value={zone} onChange={(e) => setZone(e.target.value)} required /></label>}
+          {target === 'zone' && <label>District name (as in the Excel)<input type="text" value={zone} onChange={(e) => setZone(e.target.value)} required /></label>}
           <label style={{ gridColumn: '1 / -1' }}>Message (Hindi)<input type="text" value={body} onChange={(e) => setBody(e.target.value)} required placeholder="आज के काम रात 11:59 तक पूरे करें" /></label>
           <div><button className="btn" type="submit">Send</button></div>
         </form>
@@ -65,7 +65,7 @@ export default function Reminders() {
             <tbody>
               {ann.map((a) => (
                 <tr key={a.id}><td className="muted" style={{ whiteSpace: 'nowrap' }}>{new Date(a.created_at).toLocaleString('en-IN')}</td>
-                  <td>{a.ward_no ? wardLabel(a.ward_no) : a.zone ? a.zone : a.only_pending ? 'Pending tasks' : 'Everyone'}</td><td>{a.body}</td></tr>
+                  <td>{a.ward_no ? wardLabel(a.ward_no) : (a.district || a.zone) ? (a.district || a.zone) : a.only_pending ? 'Pending tasks' : 'Everyone'}</td><td>{a.body}</td></tr>
               ))}
             </tbody>
           </table>

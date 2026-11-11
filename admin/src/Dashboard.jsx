@@ -48,7 +48,7 @@ export default function Dashboard() {
   const wardStats = useMemo(() => {
     const byWard = {};
     for (const m of members) {
-      const w = (byWard[m.ward_no] ||= { ward_no: m.ward_no, zone: m.zone || 'No zone', assembly: m.assembly || 'No assembly', members: 0, completed: 0, active: 0, videos: 0 });
+      const w = (byWard[m.ward_no] ||= { ward_no: m.ward_no, zone: m.district || m.zone || 'No district', assembly: m.assembly || 'No assembly', members: 0, completed: 0, active: 0, videos: 0 });
       w.members += 1;
     }
     for (const r of wardDay) {
@@ -112,7 +112,7 @@ export default function Dashboard() {
         </select>
         <label htmlFor="group">Group by</label>
         <select id="group" value={group} onChange={(e) => setGroup(e.target.value)}>
-          <option value="zone">MCD zone</option>
+          <option value="zone">District</option>
           <option value="assembly">Assembly</option>
         </select>
         <label htmlFor="day">Day</label>
@@ -137,7 +137,7 @@ export default function Dashboard() {
           <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 12 }}>
             <div>
               <h2>Ward heat map</h2>
-              <p className="sub">Each square is one ward, grouped by {group === 'zone' ? 'MCD zone' : 'assembly'}. Click a square to filter to that ward.</p>
+              <p className="sub">Each square is one ward, grouped by {group === 'zone' ? 'district' : 'assembly'}. Click a square to filter to that ward.</p>
             </div>
             <div className="seg" role="group" aria-label="Colour by">
               {[['completion', 'Completion'], ['active', 'Active'], ['videos', 'Videos']].map(([k, l]) => (
@@ -168,7 +168,7 @@ export default function Dashboard() {
         </section>
 
         <section className="card side" aria-label="Group ranking">
-          <h2>{group === 'zone' ? 'Zone' : 'Assembly'} ranking</h2>
+          <h2>{group === 'zone' ? 'District' : 'Assembly'} ranking</h2>
           <p className="sub" style={{ marginBottom: 12 }}>Average ward completion, this day</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 420, overflow: 'auto' }}>
             {groupRank.map((g, i) => (
