@@ -11,8 +11,8 @@ android {
         applicationId = "com.coceptual.wardsadasya"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
         buildConfigField("String", "API_URL", "\"${project.findProperty("WS_API_URL")}\"")
         buildConfigField("String", "ANON_KEY", "\"${project.findProperty("WS_ANON_KEY")}\"")
     }

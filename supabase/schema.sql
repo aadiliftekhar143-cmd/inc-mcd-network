@@ -102,7 +102,13 @@ insert into settings (key, value) values
   ('social_x', 'https://x.com/'),
   ('social_instagram', 'https://www.instagram.com/'),
   ('helpline', '9000000000'),
-  ('reminder_hours', '7,10,13,16,19,22')
+  ('reminder_hours', '7,10,13,16,19,22'),
+  ('max_upload_mb', '50'),
+  ('app_version_code', '2'),
+  ('app_version_name', '1.1'),
+  ('app_download_url', 'https://github.com/amandangi26/ward-sadasya/releases/latest'),
+  ('app_update_notes', 'नए फ़ीचर्स: पॉइंट्स सिस्टम, स्टार रेटिंग्स, तेज़ वीडियो अपलोड और बग फिक्स।'),
+  ('app_update_mandatory', 'false')
 on conflict (key) do nothing;
 
 -- Admin users (Supabase Auth users who may use the admin panel).
@@ -144,6 +150,10 @@ begin
     execute format('create policy admin_all on %I for all to authenticated using (is_admin()) with check (is_admin())', t);
   end loop;
 end $$;
+
+-- Public read for app configuration and updates
+drop policy if exists public_read_settings on settings;
+create policy public_read_settings on settings for select to anon using (true);
 
 -- Per-member totals for rankings, points and the members list.
 create or replace view member_stats with (security_invoker = true) as

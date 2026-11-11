@@ -104,6 +104,13 @@ Deno.serve(async (req) => {
         social: { facebook: s.social_facebook, x: s.social_x, instagram: s.social_instagram },
         helpline: s.helpline,
         max_upload_mb: Number(s.max_upload_mb || 50),
+        app_update: {
+          version_code: Number(s.app_version_code || 1),
+          version_name: s.app_version_name || "1.0",
+          download_url: s.app_download_url || "https://github.com/amandangi26/ward-sadasya/releases/latest",
+          notes: s.app_update_notes || "नया वर्शन उपलब्ध है।",
+          mandatory: s.app_update_mandatory === "true",
+        },
       });
     }
 

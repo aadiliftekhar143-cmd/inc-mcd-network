@@ -7,6 +7,11 @@ const KEYS = [
   ['social_instagram', 'Devender Yadav ji Instagram profile link'],
   ['helpline', 'Helpline number shown on the login screen'],
   ['reminder_hours', 'Reminder hours (24-hour clock, comma separated)'],
+  ['app_version_code', 'Android App Latest Version Code (Integer, e.g. 2)'],
+  ['app_version_name', 'Android App Latest Version Name (e.g. 1.1)'],
+  ['app_download_url', 'APK Download Link URL (e.g. https://ward-sadasya.vercel.app/download.html)'],
+  ['app_update_notes', 'App Update Message shown to members (Hindi)'],
+  ['app_update_mandatory', 'Mandatory update? (true / false)'],
 ];
 
 export default function Reminders() {

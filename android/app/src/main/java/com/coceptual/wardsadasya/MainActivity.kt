@@ -350,6 +350,56 @@ private fun HomeScreen(refreshKey: Int, onTask: (JSONObject) -> Unit, onMessages
         return
     }
 
+    val update = d.optJSONObject("app_update")
+    val serverVersionCode = update?.optInt("version_code", 1) ?: 1
+    val isMandatory = update?.optBoolean("mandatory", false) ?: false
+    val downloadUrl = update?.optString("download_url").orEmpty().ifBlank { "https://github.com/amandangi26/ward-sadasya/releases/latest" }
+    val updateNotes = update?.optString("notes").orEmpty().ifBlank { "नया वर्शन उपलब्ध है।" }
+    val versionName = update?.optString("version_name").orEmpty().ifBlank { "" }
+    val isUpdateAvailable = serverVersionCode > BuildConfig.VERSION_CODE
+    var showUpdateDialog by remember { mutableStateOf(true) }
+
+    if (isUpdateAvailable && showUpdateDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!isMandatory) showUpdateDialog = false
+            },
+            title = {
+                Text("🚀 नया अपडेट उपलब्ध है!", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (versionName.isNotBlank()) {
+                        Text("वर्शन $versionName (Build $serverVersionCode)", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Blue)
+                    }
+                    Text(updateNotes, fontSize = 14.sp, color = Ink, lineHeight = 20.sp)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "पुराना ऐप हटाने (uninstall) की ज़रूरत नहीं है। 'अभी अपडेट करें' पर दबाकर डाउनलोड करें और सीधे इंस्टॉल करें।",
+                        fontSize = 12.sp,
+                        color = Muted,
+                        lineHeight = 17.sp,
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { openLink(ctx, downloadUrl) },
+                    colors = ButtonDefaults.buttonColors(containerColor = Blue),
+                ) {
+                    Text("अभी अपडेट करें", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = if (!isMandatory) {
+                {
+                    TextButton(onClick = { showUpdateDialog = false }) {
+                        Text("बाद में", color = Muted)
+                    }
+                }
+            } else null,
+        )
+    }
+
     val member = d.getJSONObject("member")
     val tasks = d.optJSONArray("tasks") ?: JSONArray()
     val uploadTasks = (0 until tasks.length()).map { tasks.getJSONObject(it) }.filter { it.optString("kind") == "upload" }
@@ -396,6 +446,29 @@ private fun HomeScreen(refreshKey: Int, onTask: (JSONObject) -> Unit, onMessages
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            // Update Banner (if available)
+            if (isUpdateAvailable) {
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFFEFF6FF))
+                        .border(1.dp, Color(0xFFBFDBFE), RoundedCornerShape(12.dp)).padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("⚡ नया अपडेट उपलब्ध है${if (versionName.isNotBlank()) " (v$versionName)" else ""}", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Blue)
+                        Text("बेहतर परफॉर्मेंस व नए फीचर्स के लिए अपडेट करें", fontSize = 12.sp, color = Muted)
+                    }
+                    Button(
+                        onClick = { openLink(ctx, downloadUrl) },
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Blue),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.height(36.dp),
+                    ) {
+                        Text("अपडेट करें", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
             // Day strip
             if (days.length() > 0) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

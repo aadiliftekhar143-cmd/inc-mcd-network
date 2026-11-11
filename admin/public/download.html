@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MCD Election 2027 - ACTION APP | APK डाउनलोड</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Devanagari", sans-serif; }
+    body { background: #0F1B33; color: #1E293B; display: flex; justify-content: center; min-height: 100vh; padding: 20px 16px; }
+    .card { background: #FFFFFF; border-radius: 20px; max-width: 440px; width: 100%; padding: 28px 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); text-align: center; }
+    .logo { width: 84px; height: 84px; border-radius: 50%; object-fit: contain; margin-bottom: 12px; border: 3px solid #1B4FA8; padding: 4px; }
+    h1 { font-size: 20px; font-weight: 800; color: #0F1B33; margin-bottom: 4px; }
+    .subtitle { font-size: 13px; color: #64748B; font-weight: 600; margin-bottom: 20px; }
+    .badge { display: inline-block; background: #E0E7FF; color: #1B4FA8; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 20px; margin-bottom: 16px; }
+    .btn-download { display: block; background: #1B4FA8; color: #FFFFFF; text-decoration: none; font-size: 17px; font-weight: 700; padding: 15px 20px; border-radius: 12px; box-shadow: 0 4px 14px rgba(27,79,168,0.4); transition: transform 0.1s ease, background 0.2s ease; margin-bottom: 16px; }
+    .btn-download:active { transform: scale(0.98); background: #123A7E; }
+    .btn-secondary { display: block; background: #F1F5F9; color: #334155; text-decoration: none; font-size: 14px; font-weight: 600; padding: 10px; border-radius: 10px; margin-bottom: 24px; }
+    .steps { text-align: left; background: #F8FAFC; border-radius: 14px; padding: 18px; border: 1px solid #E2E8F0; }
+    .steps h3 { font-size: 14px; font-weight: 700; color: #0F1B33; margin-bottom: 12px; }
+    .step-item { display: flex; gap: 12px; margin-bottom: 12px; font-size: 13px; line-height: 1.5; color: #334155; }
+    .step-item:last-child { margin-bottom: 0; }
+    .step-num { background: #1B4FA8; color: white; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; margin-top: 1px; }
+    .note { margin-top: 20px; font-size: 12px; color: #64748B; line-height: 1.4; border-top: 1px solid #E2E8F0; padding-top: 14px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <img src="/logo.png" alt="DPCC" class="logo">
+    <h1>MCD Election 2027</h1>
+    <div class="subtitle">ACTION APP • दिल्ली प्रदेश कांग्रेस कमेटी</div>
+    
+    <div class="badge" id="versionBadge">नया वर्शन v1.1 उपलब्ध है 🚀</div>
+
+    <a href="https://github.com/amandangi26/ward-sadasya/releases/latest/download/app-release.apk" class="btn-download" id="apkDownloadBtn">
+      📲 नया APK डाउनलोड करें
+    </a>
+    <a href="https://github.com/amandangi26/ward-sadasya/releases/latest" target="_blank" class="btn-secondary">
+      GitHub रिलीज़ पेज देखें
+    </a>
+
+    <div class="steps">
+      <h3>अपडेट करने का आसान तरीका:</h3>
+      <div class="step-item">
+        <div class="step-num">1</div>
+        <div>ऊपर <strong>"नया APK डाउनलोड करें"</strong> बटन पर क्लिक करें।</div>
+      </div>
+      <div class="step-item">
+        <div class="step-num">2</div>
+        <div>डाउनलोड पूरा होने पर फ़ाइल पर टैप करके <strong>"Update"</strong> (या Install) चुनें।</div>
+      </div>
+      <div class="step-item">
+        <div class="step-num">3</div>
+        <div><strong>पुराना ऐप हटाने (uninstall) की ज़रूरत नहीं है</strong> — आपका लॉगिन और डेटा सुरक्षित रहेगा।</div>
+      </div>
+    </div>
+
+    <div class="note">
+      यदि ब्राउज़र में <em>"File might be harmful"</em> दिखे तो <strong>"Download anyway"</strong> पर टैप करें। यह DPCC की आधिकारिक ऐप फ़ाइल है।
+    </div>
+  </div>
+
+  <script>
+    // Fetch live update settings from Supabase if needed
+    const SUPABASE_URL = "https://xqbjqfjystiakfuwplby.supabase.co";
+    const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhxYmpxZmp5c3RpYWtmdXdwbGJ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQzMzQ0OTIsImV4cCI6MjEwOTkxMDQ5Mn0.VEJs1l5ZGdpTZHytYKe67-i9u5gPW9Q5dfwhTNbv2T4";
+    fetch(`${SUPABASE_URL}/rest/v1/settings?select=*`, {
+      headers: { "apikey": ANON_KEY, "Authorization": `Bearer ${ANON_KEY}` }
+    })
+    .then(r => r.json())
+    .then(data => {
+      const s = Object.fromEntries((data || []).map(r => [r.key, r.value]));
+      if (s.app_version_name) {
+        document.getElementById('versionBadge').textContent = `नया वर्शन v${s.app_version_name} उपलब्ध है 🚀`;
+      }
+      if (s.app_download_url && s.app_download_url.endsWith('.apk')) {
+        document.getElementById('apkDownloadBtn').href = s.app_download_url;
+      }
+    })
+    .catch(() => {});
+  </script>
+</body>
+</html>
