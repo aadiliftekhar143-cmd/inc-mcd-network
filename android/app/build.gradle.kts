@@ -17,11 +17,19 @@ android {
         buildConfigField("String", "ANON_KEY", "\"${project.findProperty("WS_ANON_KEY")}\"")
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("release.keystore")
+            storePassword = "wardsadasya123"
+            keyAlias = "wardsadasya"
+            keyPassword = "wardsadasya123"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Debug key is fine for a WhatsApp-shared APK. Keep the same machine/key for updates.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
