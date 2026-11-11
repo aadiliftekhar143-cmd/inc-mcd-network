@@ -658,7 +658,7 @@ private fun TaskScreen(initial: JSONObject, onBack: () -> Unit, onLogout: () -> 
                 val r = Api.call(ctx, "attach", JSONObject().put("task_id", taskId).put("kind", kind).put("path", u.getString("path")).put("size", size))
                 r.optJSONObject("task")?.let { videos = it.optInt("videos"); photos = it.optInt("photos") }
             } catch (e: ApiError) {
-                val detail = e.data.optString("detail", "")
+                val detail = e.body.optString("detail", "")
                 when {
                     e.code == "unauthorized" -> onLogout()
                     e.code == "limit_reached" -> Toast.makeText(ctx, "इस काम के सभी वीडियो जुड़ चुके हैं", Toast.LENGTH_LONG).show()

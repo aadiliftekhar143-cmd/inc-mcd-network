@@ -8,6 +8,10 @@ on:
     paths:
       - 'android/**'
       - '.github/workflows/android-apk.yml'
+
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,3 +31,17 @@ jobs:
           fi
       - uses: actions/upload-artifact@v4
         with: { name: ward-sadasya-apk, path: android/app/build/outputs/apk/release/*.apk }
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.1
+          name: "MCD Election 2027 - ACTION APP v1.1"
+          body: |
+            ### MCD Election 2027 - ACTION APP v1.1 (Build 2)
+            - ✨ पॉइंट्स सिस्टम (Points System & Rankings)
+            - ⭐ 5-स्टार परफॉर्मेंस रेटिंग्स
+            - ⚡ तेज़ वीडियो अपलोड और रीट्राय फिक्स
+            - 🚀 In-App Auto Update Alert सिस्टम
+          files: android/app/build/outputs/apk/release/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
