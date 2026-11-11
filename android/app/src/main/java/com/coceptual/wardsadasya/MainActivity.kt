@@ -34,6 +34,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PlayArrow
@@ -49,6 +50,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -528,6 +530,7 @@ private fun TaskScreen(initial: JSONObject, onBack: () -> Unit, onLogout: () -> 
     var progress by remember { mutableStateOf<Float?>(null) }
     var uploadingKind by remember { mutableStateOf<String?>(null) }
     var submitting by remember { mutableStateOf(false) }
+    var showSuccessDialog by remember { mutableStateOf(false) }
     val busy = uploadingKind != null
 
     // Keep screen awake while uploading so Android OS does not suspend network
@@ -648,10 +651,10 @@ private fun TaskScreen(initial: JSONObject, onBack: () -> Unit, onLogout: () -> 
             }
         }
 
-        // Tick
+        // Tick / Submit
         Column(Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             if (videos == 0) {
-                Text("कम से कम 1 वीडियो अपलोड होने के बाद ही टिक कर सकते हैं", fontSize = 13.sp, color = OrangeText)
+                Text("कम से कम 1 वीडियो अपलोड होने के बाद ही जमा कर सकते हैं", fontSize = 13.sp, color = OrangeText)
                 Spacer(Modifier.height(8.dp))
             }
             Button(
@@ -661,7 +664,7 @@ private fun TaskScreen(initial: JSONObject, onBack: () -> Unit, onLogout: () -> 
                         try {
                             Api.call(ctx, "complete", JSONObject().put("task_id", taskId))
                             done = true
-                            Toast.makeText(ctx, "जमा हो गया", Toast.LENGTH_SHORT).show()
+                            showSuccessDialog = true
                         } catch (e: Exception) {
                             Toast.makeText(ctx, "जमा नहीं हुआ, फिर कोशिश करें", Toast.LENGTH_LONG).show()
                         }
@@ -673,10 +676,100 @@ private fun TaskScreen(initial: JSONObject, onBack: () -> Unit, onLogout: () -> 
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 shape = RoundedCornerShape(12.dp),
             ) {
-                Icon(Icons.Filled.Check, null)
-                Text(if (done) "  जमा हो गया (अपडेट करें)" else "  टिक करें और जमा करें", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                if (submitting) {
+                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(22.dp), strokeWidth = 2.5.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Text("जमा हो रहा है…", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                } else {
+                    Icon(Icons.Filled.Check, null)
+                    Text(if (done) "  अपडेट सुरक्षित करें" else "  टिक करें और जमा करें", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
+    }
+
+    if (showSuccessDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showSuccessDialog = false
+                onBack()
+            },
+            icon = {
+                Box(
+                    modifier = Modifier.size(60.dp).clip(CircleShape).background(Color(0xFFE8F5E9)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Filled.CheckCircle,
+                        contentDescription = null,
+                        tint = Green,
+                        modifier = Modifier.size(40.dp)
+                    )
+                }
+            },
+            title = {
+                Text(
+                    text = "काम सफलतापूर्वक जमा हुआ! 🎉",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Ink,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "आपका काम और वीडियो सफलतापूर्वक रिकॉर्ड कर लिया गया है। धन्यवाद!",
+                        fontSize = 14.sp,
+                        color = Muted,
+                        textAlign = TextAlign.Center
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Ground)
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("📹 $videos वीडियो दर्ज", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                        if (photos > 0) {
+                            Text("•", color = Muted)
+                            Text("📷 $photos फोटो दर्ज", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showSuccessDialog = false
+                        onBack()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Green),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                ) {
+                    Text("होम पेज पर जाएं", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showSuccessDialog = false },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("यहीं रहें (फ़ॉर्म देखें)", fontSize = 13.sp, color = Muted)
+                }
+            },
+            shape = RoundedCornerShape(18.dp),
+            containerColor = Color.White
+        )
     }
 }
 
