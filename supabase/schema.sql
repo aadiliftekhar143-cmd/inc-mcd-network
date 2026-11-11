@@ -145,17 +145,26 @@ begin
   end loop;
 end $$;
 
--- Per-member totals for rankings and the members list.
+-- Per-member totals for rankings, points and the members list.
 create or replace view member_stats with (security_invoker = true) as
-select m.mobile, m.name, m.ward_no, m.ward_name, m.zone, m.assembly, m.active,
+select m.mobile, m.name, m.ward_no, m.ward_name, m.zone, coalesce(m.district, m.zone) as district, m.assembly, m.active,
        m.first_login_at, m.last_active_at,
        coalesce(c.tasks_done, 0) as tasks_done,
-       coalesce(c.videos, 0)     as videos
+       coalesce(med.videos, 0)   as videos,
+       coalesce(med.photos, 0)   as photos,
+       -- Points formula: 100 per completed task + 50 per video + 20 per photo
+       (coalesce(c.tasks_done, 0) * 100 + coalesce(med.videos, 0) * 50 + coalesce(med.photos, 0) * 20) as points
 from members m
 left join (
-  select mobile, count(*) as tasks_done, sum(video_count) as videos
+  select mobile, count(*) as tasks_done
   from completions group by mobile
-) c on c.mobile = m.mobile;
+) c on c.mobile = m.mobile
+left join (
+  select mobile,
+         count(*) filter (where kind = 'video') as videos,
+         count(*) filter (where kind = 'photo') as photos
+  from media group by mobile
+) med on med.mobile = m.mobile;
 
 -- Storage buckets: private uploads from members, public leader messages.
 insert into storage.buckets (id, name, public, file_size_limit)

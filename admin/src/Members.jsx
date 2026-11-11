@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import * as XLSX from 'xlsx';
-import { supabase, fetchAll, wardLabel, timeAgo, fmt } from './lib.js';
+import { supabase, fetchAll, wardLabel, timeAgo, fmt, getMemberRating } from './lib.js';
 import MemberUploads from './MemberUploads.jsx';
 
 const WARDS = Array.from({ length: 250 }, (_, i) => i + 1);
@@ -16,6 +16,7 @@ export default function Members() {
   const [q, setQ] = useState('');
   const [ward, setWard] = useState('all');
   const [status, setStatus] = useState('all');
+  const [ratingFilter, setRatingFilter] = useState('all');
   const [note, setNote] = useState(null);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(null);
@@ -63,9 +64,28 @@ export default function Members() {
   };
 
   const exportAll = () => {
-    const ws = XLSX.utils.json_to_sheet(members.map((m) => ({ name: m.name, mobile: m.mobile, ward: m.ward_no, district: m.district || m.zone, assembly: m.assembly, logged_in: m.first_login_at ? 'yes' : 'no', tasks_done: m.tasks_done, videos: m.videos, last_active: m.last_active_at })));
+    const ws = XLSX.utils.json_to_sheet(members.map((m) => {
+      const r = getMemberRating(m);
+      return {
+        name: m.name,
+        mobile: m.mobile,
+        ward: m.ward_no,
+        district: m.district || m.zone,
+        assembly: m.assembly,
+        points: m.points || 0,
+        rating_stars: r.stars,
+        rating_grade: r.grade,
+        rating_label: r.label,
+        logged_in: m.first_login_at ? 'yes' : 'no',
+        status: m.active !== false ? 'Active' : 'Blocked',
+        tasks_done: m.tasks_done,
+        videos: m.videos,
+        photos: m.photos || 0,
+        last_active: m.last_active_at,
+      };
+    }));
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'members');
-    XLSX.writeFile(wb, 'ward-members-report.xlsx');
+    XLSX.writeFile(wb, 'ward-members-performance-report.xlsx');
   };
 
   const toggle = async (m) => {
@@ -80,14 +100,22 @@ export default function Members() {
     load();
   };
 
-  const list = members.filter((m) =>
-    (ward === 'all' || m.ward_no === Number(ward)) &&
-    (status === 'all' ||
-      (status === 'in' && m.first_login_at && m.active !== false) ||
-      (status === 'out' && !m.first_login_at && m.active !== false) ||
-      (status === 'idle' && m.first_login_at && m.active !== false && (!m.last_active_at || Date.now() - new Date(m.last_active_at) > 86400000)) ||
-      (status === 'blocked' && m.active === false)) &&
-    (!q || m.name.toLowerCase().includes(q.toLowerCase()) || m.mobile.includes(q)));
+  const list = members.filter((m) => {
+    if (ward !== 'all' && m.ward_no !== Number(ward)) return false;
+    if (status === 'in' && (!m.first_login_at || m.active === false)) return false;
+    if (status === 'out' && (m.first_login_at || m.active === false)) return false;
+    if (status === 'idle' && (!m.first_login_at || m.active === false || (m.last_active_at && Date.now() - new Date(m.last_active_at) <= 86400000))) return false;
+    if (status === 'blocked' && m.active !== false) return false;
+    if (ratingFilter !== 'all') {
+      const r = getMemberRating(m);
+      if (String(r.stars) !== ratingFilter) return false;
+    }
+    if (q) {
+      const s = q.trim().toLowerCase();
+      return m.name.toLowerCase().includes(s) || m.mobile.includes(s) || (m.district && m.district.toLowerCase().includes(s));
+    }
+    return true;
+  });
 
   return (
     <section className="card">
@@ -98,7 +126,7 @@ export default function Members() {
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn ghost" onClick={template}>Download template</button>
-          <button className="btn ghost" onClick={exportAll}>Export report</button>
+          <button className="btn ghost" onClick={exportAll}>Export performance report</button>
           <label className="btn" style={{ display: 'inline-flex', alignItems: 'center', opacity: busy ? 0.5 : 1 }}>
             {busy ? 'Uploading…' : 'Upload Excel'}
             <input type="file" accept=".xlsx,.xls,.csv" hidden disabled={busy} onChange={(e) => e.target.files[0] && upload(e.target.files[0])} />
@@ -117,11 +145,20 @@ export default function Members() {
         </select>
         <label htmlFor="ms">Status</label>
         <select id="ms" value={status} onChange={(e) => setStatus(e.target.value)}>
-          <option value="all">All</option>
+          <option value="all">All statuses</option>
           <option value="in">Logged in</option>
           <option value="out">Not logged in</option>
           <option value="idle">Inactive 24 hrs</option>
           <option value="blocked">Blocked</option>
+        </select>
+        <label htmlFor="mr">Rating</label>
+        <select id="mr" value={ratingFilter} onChange={(e) => setRatingFilter(e.target.value)}>
+          <option value="all">All ratings</option>
+          <option value="5">★★★★★ (5 Stars - Star Leader)</option>
+          <option value="4">★★★★☆ (4 Stars - Active)</option>
+          <option value="3">★★★☆☆ (3 Stars - Moderate)</option>
+          <option value="2">★★☆☆☆ (2 Stars - Needs Push)</option>
+          <option value="1">★☆☆☆☆ (1 Star - Inactive)</option>
         </select>
         <span className="muted" style={{ fontSize: 13 }}>{fmt(list.length)} shown</span>
       </div>
@@ -134,42 +171,50 @@ export default function Members() {
               <th>Mobile</th>
               <th>Ward</th>
               <th>District</th>
-              <th>App login</th>
-              <th>Status</th>
-              <th>Tasks done</th>
+              <th>Points</th>
+              <th>Performance & Rating</th>
+              <th>Tasks</th>
               <th>Videos</th>
+              <th>Status</th>
               <th>Last active</th>
               <th />
             </tr>
           </thead>
           <tbody>
-            {list.slice(0, 500).map((m) => (
-              <tr key={m.mobile}>
-                <td><b>{m.name}</b></td>
-                <td>{m.mobile}</td>
-                <td>{wardLabel(m.ward_no)}</td>
-                <td className="muted">{m.district || m.zone || '–'}</td>
-                <td><span className={'tag ' + (m.first_login_at ? 'ok' : 'no')}>{m.first_login_at ? 'Logged in' : 'Not yet'}</span></td>
-                <td><span className={'tag ' + (m.active !== false ? 'ok' : 'no')}>{m.active !== false ? 'Active' : 'Blocked'}</span></td>
-                <td>{m.tasks_done}</td>
-                <td>{m.videos}</td>
-                <td className="muted">{timeAgo(m.last_active_at)}</td>
-                <td style={{ whiteSpace: 'nowrap' }}>
-                  <button className="btn ghost" style={{ minHeight: 32, padding: '4px 10px', fontSize: 12 }} onClick={() => setOpen(m)}>Uploads</button>{' '}
-                  <button
-                    className={'btn ' + (m.active !== false ? 'warn' : 'ghost')}
-                    style={{ minHeight: 32, padding: '4px 10px', fontSize: 12 }}
-                    onClick={() => toggle(m)}
-                    title={m.active !== false ? 'Block member login' : 'Unblock member login'}
-                  >
-                    {m.active !== false ? 'Block' : 'Unblock'}
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {list.slice(0, 500).map((m) => {
+              const r = getMemberRating(m);
+              return (
+                <tr key={m.mobile}>
+                  <td><b>{m.name}</b></td>
+                  <td>{m.mobile}</td>
+                  <td>{wardLabel(m.ward_no)}</td>
+                  <td className="muted">{m.district || m.zone || '–'}</td>
+                  <td><span className="pts-badge">🌟 {fmt(m.points || 0)}</span></td>
+                  <td>
+                    <span className="stars">{r.starStr}</span>{' '}
+                    <span className={r.badgeClass}>{r.grade} · {r.label}</span>
+                  </td>
+                  <td><b>{m.tasks_done}</b></td>
+                  <td>{m.videos}</td>
+                  <td><span className={'tag ' + (m.active !== false ? (m.first_login_at ? 'ok' : 'live') : 'no')}>{m.active !== false ? (m.first_login_at ? 'Active' : 'Invited') : 'Blocked'}</span></td>
+                  <td className="muted">{timeAgo(m.last_active_at)}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    <button className="btn ghost" style={{ minHeight: 32, padding: '4px 10px', fontSize: 12 }} onClick={() => setOpen(m)}>Uploads</button>{' '}
+                    <button
+                      className={'btn ' + (m.active !== false ? 'warn' : 'ghost')}
+                      style={{ minHeight: 32, padding: '4px 10px', fontSize: 12 }}
+                      onClick={() => toggle(m)}
+                      title={m.active !== false ? 'Block member login' : 'Unblock member login'}
+                    >
+                      {m.active !== false ? 'Block' : 'Unblock'}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
-        {list.length > 500 && <p className="muted">Showing first 500. Use the ward filter or search to narrow.</p>}
+        {list.length > 500 && <p className="muted">Showing first 500. Use the ward/rating filter or search to narrow.</p>}
       </div>
       {open && <MemberUploads member={open} onClose={() => setOpen(null)} />}
     </section>
