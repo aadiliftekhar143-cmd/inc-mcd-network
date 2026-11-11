@@ -30,7 +30,7 @@ function Login() {
     <div className="login card">
       <div className="brand" style={{ marginBottom: 16 }}>
         <img src="/logo.png" alt="Congress party symbol" />
-        <div><b>Ward Sadasya Admin</b></div>
+        <div><b>MCD Election 2027 · ACTION APP</b></div>
       </div>
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>Email
@@ -77,7 +77,7 @@ function App() {
       <header className="header">
         <div className="brand">
           <img src="/logo.png" alt="Congress party symbol" />
-          <div><b>Ward Sadasya · Command Dashboard</b><small>Delhi Pradesh Congress Committee · 250 MCD wards</small></div>
+          <div><b>MCD Election 2027 · ACTION APP Dashboard</b><small>Delhi Pradesh Congress Committee · 250 MCD wards</small></div>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <span className="pill"><span className="dot" />Live</span>

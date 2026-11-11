@@ -169,8 +169,8 @@ private fun LoginScreen(onDone: () -> Unit) {
                 painterResource(R.drawable.logo), contentDescription = "कांग्रेस पार्टी चिह्न",
                 modifier = Modifier.size(72.dp).clip(CircleShape).background(Color.White), contentScale = ContentScale.Fit,
             )
-            Text("वार्ड सदस्य", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
-            Text("दिल्ली प्रदेश कांग्रेस कमेटी", color = Color(0xFFC9D2E3), fontSize = 15.sp)
+            Text("MCD Election 2027", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Text("ACTION APP • दिल्ली प्रदेश कांग्रेस कमेटी", color = Color(0xFFC9D2E3), fontSize = 14.sp, fontWeight = FontWeight.Medium)
         }
 
         Column(
