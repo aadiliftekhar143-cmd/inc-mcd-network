@@ -84,6 +84,21 @@ class ReminderWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
         if (pending > 0 && (newTasks == null || newTasks.length() == 0)) {
             Notify.show(ctx, 3000, "आज के काम बाकी हैं", "आपके $pending काम बाकी हैं। रात 11:59 तक वीडियो अपलोड करें।")
         }
+
+        // 5. App update notification (system tray)
+        val update = res.optJSONObject("app_update")
+        if (update != null) {
+            val serverVersion = update.optInt("version_code", 1)
+            val versionName = update.optString("version_name", "")
+            if (serverVersion > BuildConfig.VERSION_CODE) {
+                Notify.show(
+                    ctx,
+                    9999,
+                    "🚀 नया अपडेट उपलब्ध है${if (versionName.isNotBlank()) " (v$versionName)" else ""}",
+                    update.optString("notes", "ऐप को नए फ़ीचर्स के लिए अपडेट करें।")
+                )
+            }
+        }
         return Result.success()
     }
 

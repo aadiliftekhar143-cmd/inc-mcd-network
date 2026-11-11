@@ -207,7 +207,14 @@ Deno.serve(async (req) => {
         announcements: mine,
         new_message: msg?.[0] ?? null,
         reminder_hours: s.reminder_hours,
-        now: new Date().toISOString()
+        now: new Date().toISOString(),
+        app_update: {
+          version_code: Number(s.app_version_code || 1),
+          version_name: s.app_version_name || "1.0",
+          download_url: s.app_download_url || "https://ward-sadasya.vercel.app/download.html",
+          notes: s.app_update_notes || "नया वर्शन उपलब्ध है।",
+          mandatory: s.app_update_mandatory === "true",
+        },
       });
     }
 
