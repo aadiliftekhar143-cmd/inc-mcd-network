@@ -548,14 +548,17 @@ private fun TaskScreen(initial: JSONObject, onBack: () -> Unit, onLogout: () -> 
     fun upload(uri: Uri, kind: String) {
         val mime = ctx.contentResolver.getType(uri) ?: if (kind == "video") "video/mp4" else "image/jpeg"
         val size = Api.fileSize(ctx, uri)
-        if (size > 500L * 1024 * 1024) {
-            Toast.makeText(ctx, "फाइल 500 MB से बड़ी है। छोटा वीडियो चुनें।", Toast.LENGTH_LONG).show(); return
+        val maxBytes = 50L * 1024 * 1024 // 50 MB limit for Supabase Storage
+        if (size > maxBytes) {
+            val mb = (size / (1024 * 1024)).toInt()
+            Toast.makeText(ctx, "फाइल $mb MB की है। कृपया 50 MB से छोटी फाइल चुनें।", Toast.LENGTH_LONG).show()
+            return
         }
         val ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mime) ?: if (kind == "video") "mp4" else "jpg"
         uploadingKind = kind; progress = 0f
         scope.launch {
             try {
-                val u = Api.call(ctx, "upload_url", JSONObject().put("task_id", taskId).put("kind", kind).put("ext", ext))
+                val u = Api.call(ctx, "upload_url", JSONObject().put("task_id", taskId).put("kind", kind).put("ext", ext).put("size", size))
                 var lastErr: Exception? = null
                 var ok = false
                 for (attempt in 1..3) {
@@ -568,13 +571,21 @@ private fun TaskScreen(initial: JSONObject, onBack: () -> Unit, onLogout: () -> 
                 val r = Api.call(ctx, "attach", JSONObject().put("task_id", taskId).put("kind", kind).put("path", u.getString("path")).put("size", size))
                 r.optJSONObject("task")?.let { videos = it.optInt("videos"); photos = it.optInt("photos") }
             } catch (e: ApiError) {
-                when (e.code) {
-                    "unauthorized" -> onLogout()
-                    "limit_reached" -> Toast.makeText(ctx, "इस काम के सभी वीडियो जुड़ चुके हैं", Toast.LENGTH_LONG).show()
-                    else -> Toast.makeText(ctx, "अपलोड नहीं हुआ, फिर कोशिश करें", Toast.LENGTH_LONG).show()
+                val detail = e.data.optString("detail", "")
+                when {
+                    e.code == "unauthorized" -> onLogout()
+                    e.code == "limit_reached" -> Toast.makeText(ctx, "इस काम के सभी वीडियो जुड़ चुके हैं", Toast.LENGTH_LONG).show()
+                    e.code == "file_too_large" || detail.contains("EntityTooLarge", ignoreCase = true) || detail.contains("Payload too large", ignoreCase = true) -> {
+                        Toast.makeText(ctx, "फाइल साइज 50 MB से बड़ा है। छोटा वीडियो चुनें।", Toast.LENGTH_LONG).show()
+                    }
+                    e.code.startsWith("upload_failed_") -> {
+                        val status = e.code.removePrefix("upload_failed_")
+                        Toast.makeText(ctx, "अपलोड असफल (कोड $status)। कृपया दोबारा कोशिश करें।", Toast.LENGTH_LONG).show()
+                    }
+                    else -> Toast.makeText(ctx, "अपलोड नहीं हुआ (${e.code})", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
-                Toast.makeText(ctx, "इंटरनेट चेक करें और फिर कोशिश करें", Toast.LENGTH_LONG).show()
+                Toast.makeText(ctx, "इंटरनेट चेक करें और फिर कोशिश करें (${e.message ?: "error"})", Toast.LENGTH_LONG).show()
             }
             uploadingKind = null; progress = null
         }

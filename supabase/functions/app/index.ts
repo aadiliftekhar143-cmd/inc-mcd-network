@@ -103,6 +103,7 @@ Deno.serve(async (req) => {
         member, today: istToday(), date, days, tasks, leader,
         social: { facebook: s.social_facebook, x: s.social_x, instagram: s.social_instagram },
         helpline: s.helpline,
+        max_upload_mb: Number(s.max_upload_mb || 50),
       });
     }
 
@@ -117,10 +118,17 @@ Deno.serve(async (req) => {
         .eq("mobile", mobile).eq("task_id", taskId).eq("kind", kind);
       const limit = kind === "video" ? t.video_slots : 10;
       if ((count ?? 0) >= limit) return json({ error: "limit_reached" }, 400);
+
+      const s = await settings();
+      const maxMb = Number(s.max_upload_mb || 50);
+      if (body.size && Number(body.size) > maxMb * 1024 * 1024) {
+        return json({ error: "file_too_large", max_mb: maxMb }, 400);
+      }
+
       const path = `${t.task_date}/${taskId}/${member.ward_no}/${mobile}/${kind}-${Date.now()}.${ext}`;
       const { data, error } = await db.storage.from("uploads").createSignedUploadUrl(path);
       if (error) throw error;
-      return json({ path, signed_url: data.signedUrl });
+      return json({ path, signed_url: data.signedUrl, max_mb: maxMb });
     }
 
     // ---- Register a file after it has uploaded ----
