@@ -840,15 +840,7 @@ private fun TaskScreen(initial: JSONObject, onBack: () -> Unit, onLogout: () -> 
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth().height(48.dp)
                 ) {
-                    Text("होम पेज पर जाएं", fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { showSuccessDialog = false },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("यहीं रहें (फ़ॉर्म देखें)", fontSize = 13.sp, color = Muted)
+                    Text("ठीक है (होम पेज पर जाएं)", fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 }
             },
             shape = RoundedCornerShape(18.dp),
