@@ -22,7 +22,7 @@ export default function Tasks() {
     for (const k of ['link_x', 'link_instagram', 'link_facebook', 'link_whatsapp', 'description']) if (!row[k]) row[k] = null;
     const { error } = row.id ? await supabase.from('tasks').update(row).eq('id', row.id) : await supabase.from('tasks').insert(row);
     if (error) { setMsg(error.message); return; }
-    setMsg('Saved.'); setForm(null); load();
+    setMsg('Task saved & notification sent.'); setForm(null); load();
   };
 
   const remove = async (t) => {

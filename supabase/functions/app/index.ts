@@ -170,11 +170,20 @@ Deno.serve(async (req) => {
       return json({ ok: true });
     }
 
-    // ---- Reminder check, called by the phone every 3 hours ----
+    // ---- Reminder check, called by the phone periodically and on-demand ----
     if (action === "poll") {
-      const tasks = await tasksForDate(mobile, istToday());
+      const today = istToday();
+      const tasks = await tasksForDate(mobile, today);
       const pending = tasks.filter((t) => t.kind === "upload" && !t.done).length;
-      const since = body.since ? String(body.since) : new Date(Date.now() - 3 * 3600 * 1000).toISOString();
+      const since = body.since ? String(body.since) : new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+
+      // Find any tasks created for today after 'since'
+      const { data: newTasks } = await db.from("tasks")
+        .select("id, title, description, task_date, created_at")
+        .eq("task_date", today)
+        .gt("created_at", since)
+        .order("created_at", { ascending: false });
+
       const { data: ann } = await db.from("announcements").select("*").gt("created_at", since).order("created_at");
       const mine = (ann ?? []).filter((a) =>
         (a.ward_no == null || a.ward_no === member.ward_no) &&
@@ -183,7 +192,15 @@ Deno.serve(async (req) => {
       const { data: msg } = await db.from("leader_messages").select("id, title, published_at")
         .gt("published_at", since).lte("published_at", new Date().toISOString()).order("published_at", { ascending: false }).limit(1);
       const s = await settings();
-      return json({ pending, total: tasks.filter((t) => t.kind === "upload").length, announcements: mine, new_message: msg?.[0] ?? null, reminder_hours: s.reminder_hours, now: new Date().toISOString() });
+      return json({
+        pending,
+        total: tasks.filter((t) => t.kind === "upload").length,
+        new_tasks: newTasks ?? [],
+        announcements: mine,
+        new_message: msg?.[0] ?? null,
+        reminder_hours: s.reminder_hours,
+        now: new Date().toISOString()
+      });
     }
 
     return json({ error: "unknown_action" }, 400);

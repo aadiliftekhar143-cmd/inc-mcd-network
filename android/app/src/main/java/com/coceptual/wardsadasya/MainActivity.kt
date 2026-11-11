@@ -84,6 +84,11 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onResume() {
+        super.onResume()
+        ReminderWorker.checkNow(this)
+    }
 }
 
 private sealed class Screen {
@@ -99,7 +104,11 @@ private fun WardApp() {
     var screen by remember { mutableStateOf<Screen>(if (Store.token(ctx) == null) Screen.Login else Screen.Home) }
     var homeKey by remember { mutableIntStateOf(0) }
 
-    val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            ReminderWorker.checkNow(ctx)
+        }
+    }
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= 33) notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
@@ -108,7 +117,7 @@ private fun WardApp() {
 
     Surface(Modifier.fillMaxSize(), color = Ground) {
         when (val s = screen) {
-            is Screen.Login -> LoginScreen(onDone = { screen = Screen.Home })
+            is Screen.Login -> LoginScreen(onDone = { screen = Screen.Home; ReminderWorker.checkNow(ctx) })
             is Screen.Home -> HomeScreen(
                 refreshKey = homeKey,
                 onTask = { screen = Screen.Task(it) },
