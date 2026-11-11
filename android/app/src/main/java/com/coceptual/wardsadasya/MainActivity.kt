@@ -33,12 +33,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -96,6 +100,7 @@ private sealed class Screen {
     object Home : Screen()
     data class Task(val task: JSONObject) : Screen()
     object Messages : Screen()
+    data class Notifications(val data: JSONObject) : Screen()
 }
 
 @Composable
@@ -122,10 +127,16 @@ private fun WardApp() {
                 refreshKey = homeKey,
                 onTask = { screen = Screen.Task(it) },
                 onMessages = { screen = Screen.Messages },
+                onNotifications = { screen = Screen.Notifications(it) },
                 onLogout = logout,
             )
             is Screen.Task -> TaskScreen(s.task, onBack = { homeKey++; screen = Screen.Home }, onLogout = logout)
             is Screen.Messages -> MessagesScreen(onBack = { homeKey++; screen = Screen.Home })
+            is Screen.Notifications -> NotificationsScreen(
+                data = s.data,
+                onBack = { homeKey++; screen = Screen.Home },
+                onMessages = { screen = Screen.Messages },
+            )
         }
     }
 }
@@ -320,7 +331,13 @@ private fun ProfileField(label: String, value: String) {
 // ---------------------------------------------------------------- Home
 
 @Composable
-private fun HomeScreen(refreshKey: Int, onTask: (JSONObject) -> Unit, onMessages: () -> Unit, onLogout: () -> Unit) {
+private fun HomeScreen(
+    refreshKey: Int,
+    onTask: (JSONObject) -> Unit,
+    onMessages: () -> Unit,
+    onNotifications: (JSONObject) -> Unit,
+    onLogout: () -> Unit,
+) {
     val ctx = LocalContext.current
     var date by remember { mutableStateOf<String?>(null) }
     var data by remember { mutableStateOf<JSONObject?>(null) }
@@ -421,6 +438,21 @@ private fun HomeScreen(refreshKey: Int, onTask: (JSONObject) -> Unit, onMessages
                         "वार्ड ${member.optInt("ward_no")}" + (district?.let { " · $it" } ?: ""),
                         color = Color(0xFFC9D2E3), fontSize = 14.sp,
                     )
+                }
+                val announcements = d.optJSONArray("announcements") ?: JSONArray()
+                val leaderMsg = d.optJSONObject("leader")
+                val hasUnread = isUpdateAvailable || (leaderMsg != null && !leaderMsg.optBoolean("seen")) || announcements.length() > 0
+                IconButton(onClick = { onNotifications(d) }) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.Notifications, "सूचनाएं", tint = Color.White)
+                        if (hasUnread) {
+                            Box(
+                                Modifier.size(10.dp).align(Alignment.TopEnd)
+                                    .clip(CircleShape).background(Color(0xFFEF4444))
+                                    .border(1.5.dp, Navy, CircleShape)
+                            )
+                        }
+                    }
                 }
                 IconButton(onClick = { reload++ }) { Icon(Icons.Filled.Refresh, "रीफ्रेश", tint = Color.White) }
                 IconButton(onClick = onLogout) { Icon(Icons.Filled.Logout, "नंबर बदलें", tint = Color.White) }
@@ -880,6 +912,184 @@ private fun UploadingRow(title: String, p: Float) {
         Text("$title अपलोड हो रहा है… ${(p * 100).toInt()}%", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         LinearProgressIndicator(progress = { p }, modifier = Modifier.padding(top = 6.dp).fillMaxWidth())
         Text("स्क्रीन और ऐप खुला रखें (अपलोड जारी है)", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
+// ---------------------------------------------------------------- Notifications
+
+@Composable
+private fun NotificationsScreen(
+    data: JSONObject,
+    onBack: () -> Unit,
+    onMessages: () -> Unit,
+) {
+    val ctx = LocalContext.current
+    val update = data.optJSONObject("app_update")
+    val serverVersionCode = update?.optInt("version_code", 1) ?: 1
+    val isUpdateAvailable = serverVersionCode > BuildConfig.VERSION_CODE
+    val versionName = update?.optString("version_name").orEmpty().ifBlank { "" }
+    val updateNotes = update?.optString("notes").orEmpty().ifBlank { "नया वर्शन उपलब्ध है।" }
+    val downloadUrl = update?.optString("download_url").orEmpty().ifBlank { "https://ward-sadasya.vercel.app/download.html" }
+
+    val announcements = data.optJSONArray("announcements") ?: JSONArray()
+    val leader = data.optJSONObject("leader")
+    val tasks = data.optJSONArray("tasks") ?: JSONArray()
+    val pendingUploads = (0 until tasks.length())
+        .map { tasks.getJSONObject(it) }
+        .filter { it.optString("kind") == "upload" && !it.optBoolean("done") }
+
+    Column(Modifier.fillMaxSize().background(Ground)) {
+        // Top App Bar
+        Row(
+            Modifier.fillMaxWidth().background(Navy).padding(horizontal = 8.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "वापस", tint = Color.White)
+            }
+            Text("महत्वपूर्ण सूचनाएं", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        }
+
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            // 1. App Update Card (if available)
+            if (isUpdateAvailable) {
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFFEFF6FF))
+                        .border(1.5.dp, Blue, RoundedCornerShape(14.dp))
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier.size(40.dp).clip(CircleShape).background(Color(0xFFDBEAFE)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Filled.SystemUpdate, null, tint = Blue, modifier = Modifier.size(22.dp))
+                        }
+                        Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                            Text("🚀 नया ऐप अपडेट उपलब्ध है!", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Blue)
+                            if (versionName.isNotBlank()) {
+                                Text("वर्शन v$versionName (Build $serverVersionCode)", fontSize = 12.sp, color = Muted)
+                            }
+                        }
+                    }
+                    Text(updateNotes, fontSize = 13.sp, color = Ink, lineHeight = 19.sp)
+                    Button(
+                        onClick = { openLink(ctx, downloadUrl) },
+                        colors = ButtonDefaults.buttonColors(containerColor = Blue),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().height(46.dp),
+                    ) {
+                        Text("📲 अभी नया वर्शन डाउनलोड करें", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                }
+            }
+
+            // 2. Leader Message Notification (if available)
+            if (leader != null) {
+                val seen = leader.optBoolean("seen")
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color.White)
+                        .border(1.dp, if (!seen) Color(0xFFF1C9A8) else Line, RoundedCornerShape(14.dp))
+                        .clickable { onMessages() }
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier.size(42.dp).clip(RoundedCornerShape(10.dp)).background(Orange),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.PlayArrow, null, tint = Color.White)
+                    }
+                    Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("देवेन्द्र यादव जी का संदेश", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            if (!seen) {
+                                Spacer(Modifier.width(6.dp))
+                                Box(
+                                    Modifier.clip(RoundedCornerShape(4.dp)).background(OrangeBg).padding(horizontal = 6.dp, vertical = 2.dp),
+                                ) {
+                                    Text("नया", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = OrangeText)
+                                }
+                            }
+                        }
+                        Text(leader.optString("title"), fontSize = 13.sp, color = Muted, maxLines = 1)
+                    }
+                }
+            }
+
+            // 3. Announcements
+            if (announcements.length() > 0) {
+                Text("पार्टी घोषणाएं", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Muted, modifier = Modifier.padding(top = 4.dp))
+                for (i in 0 until announcements.length()) {
+                    val a = announcements.getJSONObject(i)
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color.White)
+                            .border(1.dp, Line, RoundedCornerShape(14.dp)).padding(14.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Box(
+                            Modifier.size(38.dp).clip(CircleShape).background(Color(0xFFFEF3C7)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Filled.Campaign, null, tint = Color(0xFFD97706), modifier = Modifier.size(20.dp))
+                        }
+                        Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                            Text(a.optString("body"), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Ink, lineHeight = 20.sp)
+                            val createdAt = a.optString("created_at")
+                            if (createdAt.isNotBlank()) {
+                                Text(
+                                    createdAt.take(10),
+                                    fontSize = 11.sp,
+                                    color = Muted,
+                                    modifier = Modifier.padding(top = 4.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 4. Pending Tasks Reminder
+            if (pendingUploads.isNotEmpty()) {
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color.White)
+                        .border(1.dp, Color(0xFFFED7AA), RoundedCornerShape(14.dp))
+                        .clickable { onBack() }
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier.size(38.dp).clip(CircleShape).background(OrangeBg),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.Info, null, tint = Orange, modifier = Modifier.size(20.dp))
+                    }
+                    Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                        Text("आज के काम बाकी हैं", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = OrangeText)
+                        Text("आपके ${pendingUploads.size} काम बाकी हैं। आज रात 11:59 तक वीडियो अपलोड करें।", fontSize = 12.sp, color = Muted)
+                    }
+                }
+            }
+
+            // If completely empty
+            if (!isUpdateAvailable && leader == null && announcements.length() == 0 && pendingUploads.isEmpty()) {
+                Box(
+                    Modifier.fillMaxWidth().padding(top = 60.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Filled.Notifications, null, tint = Color(0xFFCBD5E1), modifier = Modifier.size(56.dp))
+                        Spacer(Modifier.height(8.dp))
+                        Text("अभी कोई नई सूचना नहीं है।", color = Muted, fontSize = 15.sp)
+                    }
+                }
+            }
+        }
     }
 }
 

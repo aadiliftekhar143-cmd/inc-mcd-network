@@ -98,16 +98,24 @@ Deno.serve(async (req) => {
         const { data: seen } = await db.from("message_views").select("message_id").eq("mobile", mobile).eq("message_id", msg.id).maybeSingle();
         leader = { ...msg, url: publicUrl("leader", msg.path), seen: !!seen };
       }
+      const { data: allAnn } = await db.from("announcements").select("*")
+        .order("created_at", { ascending: false }).limit(20);
+      const announcements = (allAnn ?? []).filter((a) =>
+        (a.ward_no == null || a.ward_no === member.ward_no) &&
+        ((!a.district && !a.zone) ||
+         String(a.district || a.zone || "").trim().toLowerCase() === String(member.district || member.zone || "").trim().toLowerCase())
+      );
+
       const s = await settings();
       return json({
-        member, today: istToday(), date, days, tasks, leader,
+        member, today: istToday(), date, days, tasks, leader, announcements,
         social: { facebook: s.social_facebook, x: s.social_x, instagram: s.social_instagram },
         helpline: s.helpline,
         max_upload_mb: Number(s.max_upload_mb || 50),
         app_update: {
           version_code: Number(s.app_version_code || 1),
           version_name: s.app_version_name || "1.0",
-          download_url: s.app_download_url || "https://github.com/amandangi26/ward-sadasya/releases/latest",
+          download_url: s.app_download_url || "https://ward-sadasya.vercel.app/download.html",
           notes: s.app_update_notes || "नया वर्शन उपलब्ध है।",
           mandatory: s.app_update_mandatory === "true",
         },

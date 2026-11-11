@@ -34,14 +34,16 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.1
-          name: "MCD Election 2027 - ACTION APP v1.1"
+          tag_name: v1.2
+          name: "MCD Election 2027 - ACTION APP v1.2"
           body: |
-            ### MCD Election 2027 - ACTION APP v1.1 (Build 2)
+            ### MCD Election 2027 - ACTION APP v1.2 (Build 3)
+            - 🔔 टॉप नोटिफिकेशन सेंटर (Notification Bell Icon & Screen)
+            - 🚀 In-App Auto Update Alert सिस्टम
             - ✨ पॉइंट्स सिस्टम (Points System & Rankings)
             - ⭐ 5-स्टार परफॉर्मेंस रेटिंग्स
             - ⚡ तेज़ वीडियो अपलोड और रीट्राय फिक्स
-            - 🚀 In-App Auto Update Alert सिस्टम
+            - 🎉 वीडियो सबमिट पर सेलिब्रेशन पॉपअप व ऑटो-होम रिटर्न
           files: android/app/build/outputs/apk/release/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
