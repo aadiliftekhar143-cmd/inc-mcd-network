@@ -70,7 +70,7 @@ function Login() {
             दिल्ली प्रदेश कांग्रेस कमेटी (DPCC)
           </div> */}
           <h1 className="login-title">{APP_NAME}</h1>
-          <p className="login-subtitle">MCD वार्ड प्रबंधन एवं कंट्रोल पोर्टल</p>
+          {/* <p className="login-subtitle">MCD वार्ड प्रबंधन एवं कंट्रोल पोर्टल</p> */}
         </div>
 
         <div className="login-card">
@@ -95,7 +95,7 @@ function Login() {
                   id="loginId"
                   type="text"
                   autoComplete="username"
-                  placeholder="उदा. 9876543210 या admin@domain.com"
+                  placeholder="admin@domain.com"
                   value={id}
                   onChange={(e) => setId(e.target.value)}
                   className="login-input"
@@ -155,20 +155,11 @@ function Login() {
           </form>
 
           <div className="login-extra-box">
-            <div className="login-roles-info">
-              <span className="login-role-tag">
-                {/* <span className="login-role-dot" /> */}
-                Master Admin Portal
-              </span>
-              <span className="login-role-tag">
-                {/* <span className="login-role-dot" /> */}
-                Telecaller Calling Panel
-              </span>
-            </div>
+
 
             <a href="/download" className="login-apk-link">
               <Download size={15} />
-              <span>कार्यकर्ता Android App (v1.6 APK) डाउनलोड करें</span>
+              <span>Android App (v1.6 APK) डाउनलोड करें</span>
             </a>
           </div>
         </div>
@@ -176,11 +167,11 @@ function Login() {
 
       <footer className="login-footer">
         <div>
-          <b>{APP_NAME}</b> · दिल्ली प्रदेश कांग्रेस कमेटी (DPCC) · 250 MCD Wards
+          <b>{APP_NAME}</b> · दिल्ली प्रदेश कांग्रेस कमेटी (DPCC)
         </div>
-        <div>
+        {/* <div>
           © {new Date().getFullYear()} Built by Coceptual Media
-        </div>
+        </div> */}
       </footer>
     </div>
   );
@@ -189,8 +180,8 @@ function Login() {
 function Footer() {
   return (
     <footer className="footer">
-      <span><b>{APP_NAME}</b> · Delhi Pradesh Congress Committee · 250 MCD wards</span>
-      <span>© {new Date().getFullYear()} · Built by Coceptual Media</span>
+      <span><b>{APP_NAME}</b> · Delhi Pradesh Congress Committee</span>
+      {/* <span>© {new Date().getFullYear()} · Built by Coceptual Media</span> */}
     </footer>
   );
 }
