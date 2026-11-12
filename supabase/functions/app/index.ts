@@ -47,6 +47,9 @@ const sameDistrict = (a: unknown, m: Record<string, unknown>) =>
 
 const PLATFORMS = ["x", "facebook", "instagram", "whatsapp"];
 
+// Points. Keep in step with the member_stats view in schema.sql, which is the source of truth for totals.
+const POINTS = { share: 100, photo: 100, video: 200 };
+
 async function memberStats(mobile: string) {
   const { data } = await db.from("member_stats").select("points, tasks_done, videos, photos, shares").eq("mobile", mobile).maybeSingle();
   return {
@@ -110,7 +113,10 @@ Deno.serve(async (req) => {
 
     // ---- Home: tasks for a date, latest leader message, social links ----
     if (action === "home") {
-      const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date ?? "") ? body.date : istToday();
+      const today = istToday();
+      const asked = /^\d{4}-\d{2}-\d{2}$/.test(body.date ?? "") ? body.date : today;
+      // Future dates stay locked until that day arrives in India, whatever the phone's clock says.
+      const date = asked > today ? today : asked;
       const { data: dates } = await db.from("tasks").select("task_date").order("task_date");
       const days = [...new Set((dates ?? []).map((d) => d.task_date))];
       const tasks = await tasksForDate(mobile, date);
@@ -130,9 +136,9 @@ Deno.serve(async (req) => {
 
       const s = await settings();
       return json({
-        member, today: istToday(), date, days, tasks, leader, announcements,
+        member, today, date, days, tasks, leader, announcements,
         stats: await memberStats(mobile),
-        points_rule: { task: 100, video: 50, photo: 20, share: 10 },
+        points_rule: { ...POINTS, task: 0 },
         social: { facebook: s.social_facebook, x: s.social_x, instagram: s.social_instagram },
         helpline: s.helpline,
         max_upload_mb: Number(s.max_upload_mb || 50),
@@ -153,6 +159,7 @@ Deno.serve(async (req) => {
       const ext = String(body.ext ?? (kind === "video" ? "mp4" : "jpg")).replace(/[^a-z0-9]/gi, "").slice(0, 5) || "bin";
       const { data: t } = await db.from("tasks").select("*").eq("id", taskId).maybeSingle();
       if (!t || t.kind !== "upload") return json({ error: "no_task" }, 404);
+      if (t.task_date > istToday()) return json({ error: "not_open_yet" }, 400);
       const { count } = await db.from("media").select("id", { count: "exact", head: true })
         .eq("mobile", mobile).eq("task_id", taskId).eq("kind", kind);
       const limit = kind === "video" ? t.video_slots : 10;
@@ -194,20 +201,22 @@ Deno.serve(async (req) => {
       if (videos < 1) return json({ error: "need_video" }, 400);
       const { data: before } = await db.from("completions").select("task_id").eq("mobile", mobile).eq("task_id", taskId).maybeSingle();
       await db.from("completions").upsert({ mobile, task_id: taskId, video_count: videos, photo_count: photos, completed_at: new Date().toISOString() });
-      const earned = before ? 0 : 100 + videos * 50 + photos * 20;
+      // Points come from uploads and shares; the tick itself earns nothing. Report what this task's uploads are worth.
+      const earned = before ? 0 : videos * POINTS.video + photos * POINTS.photo;
       return json({ ok: true, earned, stats: await memberStats(mobile) });
     }
 
-    // ---- Share button tapped (X, Facebook, Instagram, WhatsApp): +10 points once per task and platform ----
+    // ---- Share button tapped (X, Facebook, Instagram, WhatsApp): +100 points once per task and platform ----
     if (action === "share") {
       const taskId = Number(body.task_id);
       const platform = String(body.platform ?? "").toLowerCase();
       if (!taskId || !PLATFORMS.includes(platform)) return json({ error: "bad_share" }, 400);
-      const { data: t } = await db.from("tasks").select("id").eq("id", taskId).maybeSingle();
+      const { data: t } = await db.from("tasks").select("id, task_date").eq("id", taskId).maybeSingle();
       if (!t) return json({ error: "no_task" }, 404);
+      if (t.task_date > istToday()) return json({ error: "not_open_yet" }, 400);
       const { data: existing } = await db.from("share_events").select("platform").eq("mobile", mobile).eq("task_id", taskId).eq("platform", platform).maybeSingle();
       if (!existing) await db.from("share_events").insert({ mobile, task_id: taskId, platform, action: String(body.share_action ?? "open").slice(0, 20) });
-      return json({ ok: true, earned: existing ? 0 : 10, stats: await memberStats(mobile) });
+      return json({ ok: true, earned: existing ? 0 : POINTS.share, stats: await memberStats(mobile) });
     }
 
     // ---- Register this phone for instant (Firebase) notifications ----

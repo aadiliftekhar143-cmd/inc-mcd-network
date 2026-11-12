@@ -79,6 +79,8 @@ create table if not exists leader_messages (
   path         text not null,          -- path inside the public 'leader' bucket
   published_at timestamptz not null default now()
 );
+-- Optional short summary shown under the caption in the app.
+alter table leader_messages add column if not exists summary text;
 
 create table if not exists message_views (
   mobile     text not null references members(mobile) on delete cascade,
@@ -246,7 +248,7 @@ create policy tc_calls_write on call_logs for insert to authenticated
   with check (is_telecaller() and caller_id = auth.uid() and in_my_districts(member_mobile));
 
 -- Per-member totals for rankings, points and the members list.
--- Points: 100 per completed task + 50 per video + 20 per photo + 10 per share (per task and platform).
+-- Points: 100 per share (per task and platform) + 100 per photo + 200 per video. Completing a task earns nothing by itself.
 drop view if exists member_stats;
 create view member_stats with (security_invoker = true) as
 select m.mobile, m.name, m.ward_no, m.ward_name, m.zone, coalesce(m.district, m.zone) as district, m.assembly, m.active,
@@ -255,8 +257,7 @@ select m.mobile, m.name, m.ward_no, m.ward_name, m.zone, coalesce(m.district, m.
        coalesce(med.videos, 0)   as videos,
        coalesce(med.photos, 0)   as photos,
        coalesce(sh.shares, 0)    as shares,
-       (coalesce(c.tasks_done, 0) * 100 + coalesce(med.videos, 0) * 50 + coalesce(med.photos, 0) * 20
-        + coalesce(sh.shares, 0) * 10) as points,
+       (coalesce(sh.shares, 0) * 100 + coalesce(med.photos, 0) * 100 + coalesce(med.videos, 0) * 200) as points,
        c.last_completed_at
 from members m
 left join (

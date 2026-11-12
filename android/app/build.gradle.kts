@@ -11,8 +11,8 @@ android {
         applicationId = "com.coceptual.wardsadasya"
         minSdk = 24
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.4"
         buildConfigField("String", "API_URL", "\"${project.findProperty("WS_API_URL")}\"")
         buildConfigField("String", "ANON_KEY", "\"${project.findProperty("WS_ANON_KEY")}\"")
         // Firebase (instant notifications). Leave empty to run without push; values come from gradle.properties or CI secrets.
