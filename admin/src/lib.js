@@ -65,3 +65,46 @@ export function getWardRating(completionRate) {
   if (rate >= 25) return { stars: 2, grade: 'C', label: 'Needs Push', badgeClass: 'badge-2star', color: '#EA580C', starStr: '★★☆☆☆' };
   return { stars: 1, grade: 'D', label: 'Critical', badgeClass: 'badge-1star', color: '#DC2626', starStr: '★☆☆☆☆' };
 }
+
+// ---- Shared helpers added for telecallers, reports and instant notifications ----
+
+export const districtOf = (m) => String(m?.district || m?.zone || '').trim();
+
+/** Calls one of our Edge Functions with the signed-in user's token. Returns { data, error }. */
+export async function callFn(name, body) {
+  const { data, error } = await supabase.functions.invoke(name, { body });
+  if (error) {
+    let detail = error.message;
+    try { const j = await error.context?.json?.(); if (j?.error) detail = j.detail ? `${j.error}: ${j.detail}` : j.error; } catch (_) { /* keep message */ }
+    return { data: null, error: detail };
+  }
+  return { data, error: null };
+}
+
+/** Telecallers log in with their 10-digit mobile number; Supabase needs an email, so map it. */
+export const loginId = (v) => {
+  const t = String(v || '').trim();
+  const digits = t.replace(/\D/g, '');
+  return /^\d{10}$/.test(t.replace(/[\s-]/g, '')) ? `${digits}@inc-mcd.local` : t;
+};
+
+export const CALL_OUTCOMES = [
+  ['connected', 'Connected, spoke'],
+  ['will_do', 'Will do tasks'],
+  ['call_back', 'Asked to call back'],
+  ['not_reachable', 'Not reachable / no answer'],
+  ['switched_off', 'Switched off'],
+  ['wrong_number', 'Wrong number'],
+  ['not_interested', 'Not interested'],
+  ['other', 'Other'],
+];
+export const outcomeLabel = (k) => (CALL_OUTCOMES.find(([v]) => v === k) || [k, k || '–'])[1];
+
+export const istDate = (iso) => (iso ? new Date(new Date(iso).getTime() + 5.5 * 3600 * 1000).toISOString().slice(0, 10) : '');
+
+export function downloadXlsx(XLSX, rows, sheet, file) {
+  const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{}]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheet.slice(0, 31));
+  XLSX.writeFile(wb, file);
+}

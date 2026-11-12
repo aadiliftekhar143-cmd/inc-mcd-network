@@ -13,7 +13,7 @@ export default function Dashboard() {
   const [day, setDay] = useState(istToday());
   const [ward, setWard] = useState('all');
   const [selectedDistrict, setSelectedDistrict] = useState('all');
-  const [group, setGroup] = useState('zone');
+  const [group, setGroup] = useState('district');
   const [color, setColor] = useState('completion');
   const [scope, setScope] = useState('delhi');
   const [activeTab, setActiveTab] = useState('overview'); // overview, districts, leaderboard, followup
@@ -344,11 +344,11 @@ export default function Dashboard() {
               <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 12 }}>
                 <div>
                   <h2>Ward heat map</h2>
-                  <p className="sub">Each square is one ward, grouped by {group === 'zone' ? 'district' : 'assembly'}. Click a square to filter to that ward.</p>
+                  <p className="sub">Each square is one ward, grouped by {group === 'district' ? 'district' : 'assembly'}. Click a square to filter to that ward.</p>
                 </div>
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                   <select value={group} onChange={(e) => setGroup(e.target.value)} style={{ padding: '4px 8px', fontSize: 13 }}>
-                    <option value="zone">Group by District</option>
+                    <option value="district">Group by District</option>
                     <option value="assembly">Group by Assembly</option>
                   </select>
                   <div className="seg" role="group" aria-label="Colour by">
@@ -523,7 +523,7 @@ export default function Dashboard() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <div>
               <h2>🏛 District Performance & Rating Matrix</h2>
-              <p className="sub">Comparative ranking of all 12 Delhi Districts by points, tasks, and response rate.</p>
+              <p className="sub">Comparative ranking of all {districtList.length} Delhi districts by points, tasks and response rate.</p>
             </div>
             <button className="btn ghost" onClick={exportPerformanceReport}>Export Matrix</button>
           </div>
@@ -584,7 +584,7 @@ export default function Dashboard() {
           <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 10, marginBottom: 12 }}>
             <div>
               <h2>🏆 Member Points Leaderboard & Ratings</h2>
-              <p className="sub">Ranked by points (100 per completed task, 50 per video, 20 per photo). Showing top performers.</p>
+              <p className="sub">Ranked by points (100 per completed task, 50 per video, 20 per photo, 10 per share). Showing top performers.</p>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <div className="seg" role="group" aria-label="Ranking scope">
