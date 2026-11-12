@@ -7,6 +7,10 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.ExifInterface
 import android.view.WindowManager
 import android.webkit.MimeTypeMap
 import android.widget.MediaController
@@ -45,6 +49,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -68,7 +73,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import coil.compose.AsyncImage
+import java.io.File
+import java.io.FileOutputStream
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.NumberFormat
@@ -118,6 +128,7 @@ private sealed class Screen {
     object Messages : Screen()
     data class Notifications(val data: JSONObject) : Screen()
     object Progress : Screen()
+    object Profile : Screen()
 }
 
 private fun depth(s: Screen) = when (s) {
@@ -186,9 +197,10 @@ private fun WardApp() {
                     onLogout = logout,
                 )
                 is Screen.Task -> TaskScreen(s.task, s.shares, onBack = goHome, onLogout = logout)
-                is Screen.Messages -> MessagesScreen(nav = nav, helpline = homeData?.str("helpline"))
+                is Screen.Messages -> MessagesScreen(nav = nav, helpline = homeData?.str("helpline"), social = homeData?.optJSONObject("social"))
                 is Screen.Notifications -> NotificationsScreen(data = homeData ?: s.data, nav = nav)
-                is Screen.Progress -> ProgressScreen(data = homeData, onData = { homeData = it }, nav = nav)
+                is Screen.Progress -> ProgressScreen(data = homeData, onData = { homeData = it }, nav = nav, onProfile = { screen = Screen.Profile })
+                is Screen.Profile -> ProfileScreen(onBack = { screen = Screen.Progress }, onLogout = logout)
             }
         }
     }
@@ -1564,7 +1576,7 @@ private fun NotificationsScreen(data: JSONObject, nav: Nav) {
 // ---------------------------------------------------------------- Leader messages
 
 @Composable
-private fun MessagesScreen(nav: Nav, helpline: String?) {
+private fun MessagesScreen(nav: Nav, helpline: String?, social: JSONObject?) {
     val ctx = LocalContext.current
     var list by remember { mutableStateOf<List<JSONObject>?>(null) }
     var current by remember { mutableStateOf<JSONObject?>(null) }
@@ -1653,6 +1665,7 @@ private fun MessagesScreen(nav: Nav, helpline: String?) {
                         }
                     }
                 }
+                FollowLeader(social)
                 AppFooter(helpline = helpline)
             }
         }
@@ -1662,9 +1675,15 @@ private fun MessagesScreen(nav: Nav, helpline: String?) {
 // ---------------------------------------------------------------- Points
 
 @Composable
-private fun ProgressScreen(data: JSONObject?, onData: (JSONObject) -> Unit, nav: Nav) {
+private fun ProgressScreen(data: JSONObject?, onData: (JSONObject) -> Unit, nav: Nav, onProfile: () -> Unit) {
     val ctx = LocalContext.current
     BackHandler { nav.home() }
+    var profile by remember { mutableStateOf<JSONObject?>(null) }
+    LaunchedEffect(Unit) {
+        try { profile = Api.call(ctx, "profile", JSONObject().put("lite", true)) } catch (e: Exception) {}
+    }
+    val profileStatus = profile?.optJSONObject("latest")?.optString("status")
+    val shownName = profile?.optJSONObject("approved")?.str("full_name") ?: data?.optJSONObject("member")?.str("name")
     // Totals always come fresh from the server.
     LaunchedEffect(Unit) {
         try {
@@ -1688,15 +1707,15 @@ private fun ProgressScreen(data: JSONObject?, onData: (JSONObject) -> Unit, nav:
                             .background(Brush.linearGradient(listOf(Color(0xFF22396F), Navy))).padding(horizontal = 18.dp, vertical = 22.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Box(Modifier.size(62.dp).clip(RoundedCornerShape(18.dp)).background(Color(0x1FFFFFFF)), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Filled.EmojiEvents, null, tint = Gold, modifier = Modifier.size(34.dp))
+                        ProfilePhoto(profile?.str("photo_url"), 66, onProfile)
+                        Column(Modifier.padding(start = 16.dp).weight(1f)) {
+                            shownName?.let { Text("$it जी", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                            Text("कुल अंक", color = Color(0xFFAFC0E3), fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
+                            Text(fmtNum(stats.optInt("points")), color = Color.White, fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, lineHeight = 44.sp)
                         }
-                        Column(Modifier.padding(start = 16.dp)) {
-                            Text("कुल अंक", color = Color(0xFFAFC0E3), fontSize = 13.sp)
-                            Text(fmtNum(stats.optInt("points")), color = Color.White, fontSize = 42.sp, fontWeight = FontWeight.ExtraBold, lineHeight = 46.sp)
-                        }
+                        Icon(Icons.Filled.EmojiEvents, null, tint = Gold, modifier = Modifier.size(34.dp))
                     }
-                    Text("अंक कैसे बनें", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Muted, modifier = Modifier.padding(start = 2.dp, top = 20.dp, bottom = 10.dp))
+                    Text("आपके अंक ऐसे गिने जाते हैं", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Muted, modifier = Modifier.padding(start = 2.dp, top = 20.dp, bottom = 10.dp))
                     CardBox {
                         PointsRow(Icons.Filled.Share, Color(0xFFE8F0FE), Blue, "सोशल मीडिया शेयर", stats.optInt("shares"), perShare)
                         HorizontalDivider(color = Color(0xFFF0F2F6))
@@ -1707,6 +1726,28 @@ private fun ProgressScreen(data: JSONObject?, onData: (JSONObject) -> Unit, nav:
                     Row(Modifier.padding(top = 10.dp, start = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Info, null, tint = Muted, modifier = Modifier.size(14.dp))
                         Text("  हर शेयर पर $perShare, हर फोटो पर $perPhoto और हर वीडियो पर $perVideo अंक।", fontSize = 12.5.sp, color = Muted)
+                    }
+                    // Profile
+                    Text("मेरी प्रोफ़ाइल", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Muted, modifier = Modifier.padding(start = 2.dp, top = 22.dp, bottom = 10.dp))
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color.White)
+                            .border(1.dp, Line, RoundedCornerShape(20.dp)).clickable { onProfile() }.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconTile(Icons.Filled.Person, Color(0xFFE8F0FE), Blue)
+                        Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                            Text("प्रोफ़ाइल एडिट करें", fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = Ink)
+                            Text(
+                                when (profileStatus) {
+                                    "pending" -> "मंज़ूरी का इंतज़ार है"
+                                    "approved" -> "मंज़ूर हो चुकी है"
+                                    "rejected" -> "मंज़ूर नहीं हुई, फिर से भेजें"
+                                    else -> "फोटो, नाम, वार्ड, परिवार और मोबाइल नंबर जोड़ें"
+                                },
+                                fontSize = 12.sp, color = if (profileStatus == "rejected") Color(0xFF9B1C1C) else Muted,
+                            )
+                        }
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Muted)
                     }
                 }
                 AppFooter(helpline = data?.str("helpline"))
@@ -1726,6 +1767,248 @@ private fun PointsRow(icon: ImageVector, bg: Color, fg: Color, label: String, co
         Column(horizontalAlignment = Alignment.End) {
             Text(fmtNum(count * each), fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
             Text("$count × $each", fontSize = 11.5.sp, color = Muted)
+        }
+    }
+}
+
+// ---------------------------------------------------------------- Follow Devender Yadav ji
+
+/** Facebook, X and Instagram buttons that open the leader's profiles (links set in admin Settings). */
+@Composable
+private fun FollowLeader(social: JSONObject?) {
+    val ctx = LocalContext.current
+    val items = listOf(
+        Triple("facebook", "Facebook", R.drawable.ic_facebook),
+        Triple("x", "X", R.drawable.ic_x),
+        Triple("instagram", "Instagram", R.drawable.ic_instagram),
+    ).mapNotNull { (key, label, icon) -> social?.str(key)?.let { url -> Triple(label, icon, key to url) } }
+    if (items.isEmpty()) return
+    Column(
+        Modifier.padding(start = 16.dp, end = 16.dp, top = 22.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp))
+            .background(Color.White).border(1.dp, Line, RoundedCornerShape(20.dp)).padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("देवेन्द्र यादव जी के सोशल मीडिया हैंडल्स को फॉलो करें", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Ink, textAlign = TextAlign.Center)
+        Row(Modifier.padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(22.dp)) {
+            items.forEach { (label, icon, link) ->
+                val (key, url) = link
+                val bg = when (key) {
+                    "facebook" -> Brush.linearGradient(listOf(Color(0xFF1877F2), Color(0xFF1877F2)))
+                    "x" -> Brush.linearGradient(listOf(Color(0xFF111111), Color(0xFF111111)))
+                    else -> Brush.linearGradient(listOf(Color(0xFFFEDA75), Color(0xFFFA7E1E), Color(0xFFD62976), Color(0xFF962FBF), Color(0xFF4F5BD5)))
+                }
+                Column(
+                    Modifier.clip(RoundedCornerShape(12.dp)).clickable { Social.open(ctx, key, url) }.padding(4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Box(Modifier.size(54.dp).clip(CircleShape).background(bg), contentAlignment = Alignment.Center) {
+                        Icon(painterResource(icon), contentDescription = label, tint = Color.White, modifier = Modifier.size(26.dp))
+                    }
+                    Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Muted, modifier = Modifier.padding(top = 6.dp))
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- Profile
+
+/** Round profile photo, or a person icon when there is none. */
+@Composable
+private fun ProfilePhoto(model: Any?, size: Int, onClick: (() -> Unit)? = null) {
+    Box(
+        Modifier.size(size.dp).clip(CircleShape).background(Color(0x22FFFFFF)).border(2.dp, Color.White, CircleShape)
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (model != null) AsyncImage(model = model, contentDescription = "प्रोफ़ाइल फोटो", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        else Icon(Icons.Filled.Person, null, tint = Color.White, modifier = Modifier.size((size * 0.55f).dp))
+    }
+}
+
+/** Crops the picked image to a centred square, scales it to 640 px and saves it as a JPEG in the cache. */
+private fun squarePhoto(ctx: Context, uri: Uri): File? = try {
+    val src = ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+    if (src == null) null else {
+        // Respect the camera's rotation so faces are upright.
+        val rotation = try {
+            ctx.contentResolver.openInputStream(uri)?.use {
+                when (ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+                    ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                    ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                    ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                    else -> 0
+                }
+            } ?: 0
+        } catch (e: Exception) { 0 }
+        val upright = if (rotation != 0) Bitmap.createBitmap(src, 0, 0, src.width, src.height, Matrix().apply { postRotate(rotation.toFloat()) }, true) else src
+        val side = minOf(upright.width, upright.height)
+        val square = Bitmap.createBitmap(upright, (upright.width - side) / 2, (upright.height - side) / 2, side, side)
+        val scaled = Bitmap.createScaledBitmap(square, 640, 640, true)
+        val out = File(ctx.cacheDir, "profile-${System.currentTimeMillis()}.jpg")
+        FileOutputStream(out).use { scaled.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+        out
+    }
+} catch (e: Exception) { null }
+
+/** Text field that opens a list to pick from. */
+@Composable
+private fun PickField(label: String, value: String, options: List<Pair<String, String>>, onPick: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val shown = options.firstOrNull { it.first == value }?.second ?: value
+    Box(Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = shown, onValueChange = {}, readOnly = true, label = { Text(label) },
+            trailingIcon = { Icon(Icons.Filled.ArrowDropDown, null) },
+            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), singleLine = true,
+        )
+        // Transparent layer so the whole field opens the list.
+        Box(Modifier.matchParentSize().padding(top = 8.dp).clip(RoundedCornerShape(12.dp)).clickable { open = true })
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }, modifier = Modifier.heightIn(max = 360.dp)) {
+            options.forEach { (v, text) ->
+                DropdownMenuItem(text = { Text(text, fontSize = 14.sp) }, onClick = { onPick(v); open = false })
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileScreen(onBack: () -> Unit, onLogout: () -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    BackHandler { onBack() }
+
+    var loaded by remember { mutableStateOf<JSONObject?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var name by remember { mutableStateOf("") }
+    var details by remember { mutableStateOf("") }
+    var ward by remember { mutableStateOf("") }
+    var assembly by remember { mutableStateOf("") }
+    var lokSabha by remember { mutableStateOf("") }
+    var district by remember { mutableStateOf("") }
+    var family by remember { mutableStateOf("") }
+    var mobile by remember { mutableStateOf("") }
+    var altMobile by remember { mutableStateOf("") }
+    var photoUrl by remember { mutableStateOf<String?>(null) }
+    var newPhoto by remember { mutableStateOf<File?>(null) }
+    var saving by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        try {
+            val r = Api.call(ctx, "profile")
+            // Prefill from the latest request, else the approved profile, else what the admin uploaded.
+            val src = r.optJSONObject("latest") ?: r.optJSONObject("approved") ?: r.optJSONObject("defaults") ?: JSONObject()
+            val def = r.optJSONObject("defaults") ?: JSONObject()
+            fun pick(k: String) = src.str(k) ?: def.str(k) ?: ""
+            name = pick("full_name"); details = src.str("details") ?: ""
+            ward = pick("ward_no"); assembly = pick("assembly"); lokSabha = src.str("lok_sabha") ?: ""
+            district = pick("district"); family = src.str("family_members") ?: ""
+            mobile = pick("contact_mobile"); altMobile = src.str("alt_mobile") ?: ""
+            photoUrl = r.str("photo_url")
+            loaded = r
+        } catch (e: ApiError) {
+            if (e.code == "unauthorized") onLogout() else error = "प्रोफ़ाइल लोड नहीं हुई।"
+        } catch (e: Exception) { error = "इंटरनेट चेक करें।" }
+    }
+
+    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let { scope.launch { newPhoto = withContext(Dispatchers.IO) { squarePhoto(ctx, it) } ?: run { Toast.makeText(ctx, "फोटो नहीं खुल सकी", Toast.LENGTH_SHORT).show(); null } } }
+    }
+
+    fun save() {
+        if (name.isBlank()) { Toast.makeText(ctx, "पूरा नाम लिखें", Toast.LENGTH_SHORT).show(); return }
+        if (mobile.isNotBlank() && mobile.length != 10) { Toast.makeText(ctx, "मोबाइल नंबर 10 अंकों का हो", Toast.LENGTH_SHORT).show(); return }
+        if (altMobile.isNotBlank() && altMobile.length != 10) { Toast.makeText(ctx, "वैकल्पिक मोबाइल नंबर 10 अंकों का हो", Toast.LENGTH_SHORT).show(); return }
+        saving = true
+        scope.launch {
+            try {
+                var photoPath: String? = null
+                newPhoto?.let { file ->
+                    val u = Api.call(ctx, "profile_photo_url", JSONObject().put("ext", "jpg").put("size", file.length()))
+                    Api.upload(ctx, u.getString("signed_url"), Uri.fromFile(file), "image/jpeg") {}
+                    photoPath = u.getString("path")
+                }
+                val p = JSONObject()
+                    .put("full_name", name.trim()).put("details", details.trim())
+                    .put("ward_no", ward).put("assembly", assembly).put("lok_sabha", lokSabha).put("district", district)
+                    .put("family_members", family).put("contact_mobile", mobile).put("alt_mobile", altMobile)
+                photoPath?.let { p.put("photo_path", it) }
+                Api.call(ctx, "profile_save", p)
+                Toast.makeText(ctx, "जानकारी भेज दी गई। एडमिन की मंज़ूरी के बाद जुड़ जाएगी।", Toast.LENGTH_LONG).show()
+                onBack()
+            } catch (e: ApiError) {
+                when (e.code) {
+                    "unauthorized" -> onLogout()
+                    "bad_mobile", "bad_alt_mobile" -> Toast.makeText(ctx, "मोबाइल नंबर सही नहीं है", Toast.LENGTH_LONG).show()
+                    else -> Toast.makeText(ctx, "सेव नहीं हुआ (${e.code})", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(ctx, "इंटरनेट चेक करें और फिर कोशिश करें", Toast.LENGTH_LONG).show()
+            }
+            saving = false
+        }
+    }
+
+    Column(Modifier.fillMaxSize().background(Ground)) {
+        PageTop("प्रोफ़ाइल एडिट करें", onBack)
+        val r = loaded
+        if (r == null) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                if (error != null) Text(error!!, color = OrangeText) else CircularProgressIndicator(color = Orange)
+            }
+            return@Column
+        }
+        val opts = r.optJSONObject("options") ?: JSONObject()
+        fun list(k: String) = opts.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
+        val wards = opts.optJSONArray("wards")?.let { a ->
+            (0 until a.length()).map { i -> val w = a.getJSONObject(i); val no = w.optInt("no"); no.toString() to ("वार्ड $no" + (w.str("name")?.let { " · $it" } ?: "")) }
+        } ?: (1..250).map { it.toString() to "वार्ड $it" }
+        val status = r.optJSONObject("latest")?.optString("status")
+
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            when (status) {
+                "pending" -> Chip("आपकी पिछली जानकारी मंज़ूरी के लिए भेजी जा चुकी है। बदलाव करके फिर भेज सकते हैं।", OrangeBg, OrangeText)
+                "approved" -> Chip("आपकी प्रोफ़ाइल मंज़ूर हो चुकी है।", GreenBg, GreenText)
+                "rejected" -> Chip("पिछली जानकारी मंज़ूर नहीं हुई। सही करके फिर भेजें।", Color(0xFFFDE8E8), Color(0xFF9B1C1C))
+            }
+            // Photo
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Navy).padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ProfilePhoto(newPhoto ?: photoUrl, 84) { pickPhoto.launch("image/*") }
+                Column(Modifier.padding(start = 16.dp).weight(1f)) {
+                    Text("प्रोफ़ाइल फोटो", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text("चौकोर (1:1) फोटो अपने आप बन जाएगी", color = Color(0xFFAFC0E3), fontSize = 12.sp)
+                    OutlinedButton(
+                        onClick = { pickPhoto.launch("image/*") }, modifier = Modifier.padding(top = 8.dp).height(38.dp),
+                        shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, Color(0x55FFFFFF)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                    ) { Icon(Icons.Filled.PhotoCamera, null, modifier = Modifier.size(16.dp)); Text(if (newPhoto != null || photoUrl != null) "  फोटो बदलें" else "  फोटो चुनें", fontSize = 13.sp) }
+                }
+            }
+
+            OutlinedTextField(name, { name = it.take(80) }, label = { Text("पूरा नाम *") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+            OutlinedTextField(details, { details = it.take(500) }, label = { Text("अपने बारे में (पद, काम आदि)") }, minLines = 2, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+            PickField("वार्ड नंबर", ward, wards) { ward = it }
+            PickField("विधानसभा", assembly, list("assemblies").map { it to it }) { assembly = it }
+            PickField("लोकसभा", lokSabha, list("lok_sabha").map { it to it }) { lokSabha = it }
+            PickField("ज़िला", district, list("districts").map { it to it }) { district = it }
+            OutlinedTextField(family, { v -> family = v.filter { it.isDigit() }.take(2) }, label = { Text("परिवार में सदस्यों की संख्या") }, singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+            OutlinedTextField(mobile, { v -> mobile = v.filter { it.isDigit() }.take(10) }, label = { Text("मोबाइल नंबर") }, singleLine = true, prefix = { Text("+91 ") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+            OutlinedTextField(altMobile, { v -> altMobile = v.filter { it.isDigit() }.take(10) }, label = { Text("वैकल्पिक मोबाइल नंबर") }, singleLine = true, prefix = { Text("+91 ") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+            Text("लॉगिन नंबर नहीं बदलेगा। यह जानकारी एडमिन की मंज़ूरी के बाद आपकी प्रोफ़ाइल में जुड़ेगी।", fontSize = 12.sp, color = Muted, lineHeight = 17.sp)
+        }
+        Button(
+            onClick = { save() }, enabled = !saving,
+            modifier = Modifier.padding(16.dp).fillMaxWidth().height(54.dp), shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Navy),
+        ) {
+            if (saving) { CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp); Text("  भेजा जा रहा है…", fontWeight = FontWeight.Bold) }
+            else Text("सेव करें और मंज़ूरी के लिए भेजें", fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
     }
 }

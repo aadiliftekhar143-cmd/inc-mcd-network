@@ -43,27 +43,27 @@ export function getMemberRating(m) {
   const loggedIn = !!m.first_login_at;
 
   if (tasks >= 3 || pts >= 500 || (tasks >= 2 && vids >= 4)) {
-    return { stars: 5, score: 95, grade: 'A+', label: 'Star Performer', badgeClass: 'badge-5star', color: '#10B981', starStr: '★★★★★' };
+    return { stars: 5, score: 95, grade: 'A+', label: 'Star Performer', badgeClass: 'badge-5star', color: '#10B981', starStr: '5/5' };
   }
   if (tasks >= 2 || pts >= 250 || (tasks >= 1 && vids >= 2)) {
-    return { stars: 4, score: 80, grade: 'A', label: 'Active', badgeClass: 'badge-4star', color: '#2563EB', starStr: '★★★★☆' };
+    return { stars: 4, score: 80, grade: 'A', label: 'Active', badgeClass: 'badge-4star', color: '#2563EB', starStr: '4/5' };
   }
   if (tasks >= 1 || pts >= 100) {
-    return { stars: 3, score: 65, grade: 'B', label: 'Moderate', badgeClass: 'badge-3star', color: '#D97706', starStr: '★★★☆☆' };
+    return { stars: 3, score: 65, grade: 'B', label: 'Moderate', badgeClass: 'badge-3star', color: '#D97706', starStr: '3/5' };
   }
   if (loggedIn) {
-    return { stars: 2, score: 40, grade: 'C', label: 'Needs Push', badgeClass: 'badge-2star', color: '#EA580C', starStr: '★★☆☆☆' };
+    return { stars: 2, score: 40, grade: 'C', label: 'Needs Push', badgeClass: 'badge-2star', color: '#EA580C', starStr: '2/5' };
   }
-  return { stars: 1, score: 10, grade: 'D', label: 'Inactive', badgeClass: 'badge-1star', color: '#DC2626', starStr: '★☆☆☆☆' };
+  return { stars: 1, score: 10, grade: 'D', label: 'Inactive', badgeClass: 'badge-1star', color: '#DC2626', starStr: '1/5' };
 }
 
 export function getWardRating(completionRate) {
   const rate = Number(completionRate || 0);
-  if (rate >= 85) return { stars: 5, grade: 'A+', label: 'Top Tier', badgeClass: 'badge-5star', color: '#10B981', starStr: '★★★★★' };
-  if (rate >= 70) return { stars: 4, grade: 'A', label: 'Good', badgeClass: 'badge-4star', color: '#2563EB', starStr: '★★★★☆' };
-  if (rate >= 50) return { stars: 3, grade: 'B', label: 'Moderate', badgeClass: 'badge-3star', color: '#D97706', starStr: '★★★☆☆' };
-  if (rate >= 25) return { stars: 2, grade: 'C', label: 'Needs Push', badgeClass: 'badge-2star', color: '#EA580C', starStr: '★★☆☆☆' };
-  return { stars: 1, grade: 'D', label: 'Critical', badgeClass: 'badge-1star', color: '#DC2626', starStr: '★☆☆☆☆' };
+  if (rate >= 85) return { stars: 5, grade: 'A+', label: 'Top Tier', badgeClass: 'badge-5star', color: '#10B981', starStr: '5/5' };
+  if (rate >= 70) return { stars: 4, grade: 'A', label: 'Good', badgeClass: 'badge-4star', color: '#2563EB', starStr: '4/5' };
+  if (rate >= 50) return { stars: 3, grade: 'B', label: 'Moderate', badgeClass: 'badge-3star', color: '#D97706', starStr: '3/5' };
+  if (rate >= 25) return { stars: 2, grade: 'C', label: 'Needs Push', badgeClass: 'badge-2star', color: '#EA580C', starStr: '2/5' };
+  return { stars: 1, grade: 'D', label: 'Critical', badgeClass: 'badge-1star', color: '#DC2626', starStr: '1/5' };
 }
 
 // ---- Shared helpers added for telecallers, reports and instant notifications ----
@@ -107,4 +107,27 @@ export function downloadXlsx(XLSX, rows, sheet, file) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, sheet.slice(0, 31));
   XLSX.writeFile(wb, file);
+}
+
+// ---- Share-card platforms and task notification text ----
+
+export const PLATFORMS = [
+  { key: 'facebook', col: 'link_facebook', label: 'Facebook', field: 'Facebook post link', placeholder: 'https://www.facebook.com/…' },
+  { key: 'instagram', col: 'link_instagram', label: 'Instagram', field: 'Instagram post or reel link', placeholder: 'https://www.instagram.com/p/…' },
+  { key: 'x', col: 'link_x', label: 'X (Twitter)', field: 'X (Twitter) post link', placeholder: 'https://x.com/user/status/123…' },
+  { key: 'whatsapp', col: 'link_whatsapp', label: 'WhatsApp', field: 'WhatsApp message (text and/or link members forward)', placeholder: 'वादों का हिसाब दो, दिल्ली को जवाब दो। देखें: https://…' },
+];
+
+/** Which platform a share card is for (the first link that is filled). */
+export const platformOf = (t) => (PLATFORMS.find((p) => t?.[p.col]) || PLATFORMS[0]).key;
+
+/** Notification title and text for a task, built from the task itself. Keep in step with taskNotice() in supabase/functions/app/index.ts. */
+export function taskNotice(t) {
+  const desc = String(t.description || '').trim();
+  if (t.kind === 'share') {
+    const p = PLATFORMS.find((x) => t[x.col]) || PLATFORMS[0];
+    return { title: `नई पोस्ट: ${p.label} पर शेयर करें`, body: desc ? `${t.title} · ${desc}`.slice(0, 240) : t.title };
+  }
+  const slots = Number(t.video_slots || 1);
+  return { title: `नया टास्क: ${t.title}`.slice(0, 120), body: desc ? desc.slice(0, 240) : `${slots} वीडियो अपलोड करें, आज रात 11:59 तक।` };
 }

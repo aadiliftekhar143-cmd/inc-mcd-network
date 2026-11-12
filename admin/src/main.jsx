@@ -10,6 +10,8 @@ import Reminders from './Reminders.jsx';
 import Calling from './Calling.jsx';
 import Reports from './Reports.jsx';
 import Team from './Team.jsx';
+import Settings from './Settings.jsx';
+import ProfileUpdates from './ProfileUpdates.jsx';
 
 const APP_NAME = 'INC MCD NETWORK';
 
@@ -20,8 +22,10 @@ const ADMIN_TABS = [
   ['tasks', 'Tasks'],
   ['members', 'Ward members'],
   ['messages', 'Leader messages'],
-  ['reminders', 'Notifications and links'],
+  ['reminders', 'Notifications'],
+  ['profiles', 'Profile updates'],
   ['team', 'Team'],
+  ['settings', 'Settings'],
 ];
 const TELECALLER_TABS = [['calling', 'Calling list']];
 
@@ -140,6 +144,8 @@ function App() {
         {tab === 'messages' && <Messages />}
         {tab === 'reminders' && <Reminders />}
         {tab === 'team' && <Team />}
+        {tab === 'profiles' && <ProfileUpdates />}
+        {tab === 'settings' && <Settings />}
       </main>
       <Footer />
     </>

@@ -68,7 +68,7 @@ tr:nth-child(even) td{background:#FAFBFC}
 /* Points & Rating System Styles */
 .pts-badge{display:inline-flex;align-items:center;gap:4px;background:#FEF3C7;color:#92400E;border:1px solid #FDE68A;font-weight:700;font-size:12px;padding:3px 9px;border-radius:6px;white-space:nowrap}
 .pts-badge.large{font-size:14px;padding:5px 12px}
-.stars{color:#F59E0B;letter-spacing:1px;font-size:13px;white-space:nowrap}
+.stars{color:#F59E0B;display:inline-flex;align-items:center;gap:1px;vertical-align:-2px;white-space:nowrap}
 .star-btn{border:1px solid #CDD2DA;background:#fff;border-radius:20px;padding:6px 14px;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:all .15s}
 .star-btn:hover{border-color:#1B4FA8;background:#F8FAFC}
 .star-btn.on{background:#0F1B33;color:#fff;border-color:#0F1B33;font-weight:600}
@@ -97,3 +97,18 @@ tr:nth-child(even) td{background:#FAFBFC}
 .login-wrap{min-height:100vh;display:flex;flex-direction:column;justify-content:space-between}
 .login-wrap .footer{width:100%;border-top:0}
 .login .brand small{display:block;font-size:13px}
+
+/* Settings: view, then Edit to change one value */
+.set-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;margin-top:14px}
+.set-item{border:1px solid #E3E6EB;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;background:#fff}
+.set-item .lbl{font-size:12.5px;color:#5B6270;display:flex;align-items:center;gap:6px}
+.set-item .val{font-size:14px;font-weight:600;word-break:break-all;display:flex;align-items:center;gap:6px;min-height:22px}
+.set-item .val.empty{color:#9AA1AD;font-weight:400}
+.set-item .acts{display:flex;gap:6px}
+.btn.sm{min-height:32px;padding:4px 10px;font-size:12.5px;display:inline-flex;align-items:center;gap:5px}
+.platform-pick{display:flex;gap:8px;flex-wrap:wrap}
+.platform-pick button{display:inline-flex;align-items:center;gap:6px;border:1px solid #CDD2DA;background:#fff;border-radius:8px;padding:8px 12px;cursor:pointer;font-size:13.5px}
+.platform-pick button.on{border-color:#1B4FA8;background:#EEF3FC;color:#1B4FA8;font-weight:600}
+.avatar{width:56px;height:56px;border-radius:10px;object-fit:cover;background:#EEF0F4}
+.diff td{vertical-align:top}
+.diff .chg{background:#FFF7E6}

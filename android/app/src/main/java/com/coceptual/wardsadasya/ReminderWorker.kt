@@ -57,11 +57,13 @@ class ReminderWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
                 val t = newTasks.getJSONObject(i)
                 val taskId = t.optInt("id", (System.currentTimeMillis() % 10000).toInt())
                 val title = t.optString("title", "नया टास्क")
+                // Text comes from the task itself (built on the server), so share cards and upload tasks read differently.
+                val notice = t.optJSONObject("notify")
                 Notify.show(
                     ctx,
                     4000 + taskId,
-                    "नया टास्क: $title",
-                    "आज रात 11:59 तक वीडियो अपलोड करें।"
+                    notice?.optString("title")?.takeIf { it.isNotBlank() } ?: "नया टास्क: $title",
+                    notice?.optString("body")?.takeIf { it.isNotBlank() } ?: "आज रात 11:59 तक वीडियो अपलोड करें।",
                 )
             }
         }

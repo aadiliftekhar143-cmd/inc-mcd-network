@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Stars, Pts } from './icons.jsx';
 import * as XLSX from 'xlsx';
 import { supabase, fetchAll, wardLabel, timeAgo, fmt, getMemberRating } from './lib.js';
 import MemberUploads from './MemberUploads.jsx';
@@ -154,11 +155,11 @@ export default function Members() {
         <label htmlFor="mr">Rating</label>
         <select id="mr" value={ratingFilter} onChange={(e) => setRatingFilter(e.target.value)}>
           <option value="all">All ratings</option>
-          <option value="5">★★★★★ (5 Stars - Star Leader)</option>
-          <option value="4">★★★★☆ (4 Stars - Active)</option>
-          <option value="3">★★★☆☆ (3 Stars - Moderate)</option>
-          <option value="2">★★☆☆☆ (2 Stars - Needs Push)</option>
-          <option value="1">★☆☆☆☆ (1 Star - Inactive)</option>
+          <option value="5">5 Stars - Star Leader</option>
+          <option value="4">4 Stars - Active</option>
+          <option value="3">3 Stars - Moderate</option>
+          <option value="2">2 Stars - Needs Push</option>
+          <option value="1">1 Star - Inactive</option>
         </select>
         <span className="muted" style={{ fontSize: 13 }}>{fmt(list.length)} shown</span>
       </div>
@@ -189,9 +190,9 @@ export default function Members() {
                   <td>{m.mobile}</td>
                   <td>{wardLabel(m.ward_no)}</td>
                   <td className="muted">{m.district || m.zone || '–'}</td>
-                  <td><span className="pts-badge">🌟 {fmt(m.points || 0)}</span></td>
+                  <td><span className="pts-badge"><Pts>{fmt(m.points || 0)}</Pts></span></td>
                   <td>
-                    <span className="stars">{r.starStr}</span>{' '}
+                    <Stars n={r.stars} />{' '}
                     <span className={r.badgeClass}>{r.grade} · {r.label}</span>
                   </td>
                   <td><b>{m.tasks_done}</b></td>

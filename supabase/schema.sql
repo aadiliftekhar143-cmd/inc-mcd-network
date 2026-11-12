@@ -172,6 +172,48 @@ create table if not exists share_events (
   primary key (mobile, task_id, platform)
 );
 
+-- Profile details members fill in from the app (photo, name, ward, assembly, Lok Sabha, district, family size,
+-- contact numbers). Kept apart from members: login stays on the allotted number and nothing here changes it.
+-- Every save is a request; an admin approves it in the Profile updates tab, which copies it into member_profiles.
+create table if not exists profile_requests (
+  id             bigserial primary key,
+  mobile         text not null references members(mobile) on delete cascade,
+  full_name      text not null,
+  details        text,
+  ward_no        int,
+  assembly       text,
+  lok_sabha      text,
+  district       text,
+  family_members int check (family_members between 0 and 50),
+  contact_mobile text,
+  alt_mobile     text,
+  photo_path     text,           -- inside the private 'uploads' bucket, under profiles/<mobile>/
+  status         text not null default 'pending' check (status in ('pending','approved','rejected')),
+  submitted_at   timestamptz not null default now(),
+  reviewed_at    timestamptz,
+  reviewed_by    text,
+  review_note    text
+);
+create index if not exists profile_requests_status_idx on profile_requests (status, submitted_at desc);
+create index if not exists profile_requests_mobile_idx on profile_requests (mobile, submitted_at desc);
+
+-- Approved profile, one row per member.
+create table if not exists member_profiles (
+  mobile         text primary key references members(mobile) on delete cascade,
+  full_name      text not null,
+  details        text,
+  ward_no        int,
+  assembly       text,
+  lok_sabha      text,
+  district       text,
+  family_members int,
+  contact_mobile text,
+  alt_mobile     text,
+  photo_path     text,
+  request_id     bigint references profile_requests(id) on delete set null,
+  approved_at    timestamptz not null default now()
+);
+
 -- SECURITY: an earlier version promoted every new Supabase Auth user to admin.
 -- With public sign-ups on, anyone could make themselves an admin. Removed.
 -- Admins and telecallers are now created from the admin panel (Team tab).
@@ -214,7 +256,7 @@ $$;
 do $$
 declare t text;
 begin
-  foreach t in array array['members','sessions','tasks','media','completions','leader_messages','message_views','announcements','settings','admins','telecallers','call_logs','push_tokens','share_events']
+  foreach t in array array['members','sessions','tasks','media','completions','leader_messages','message_views','announcements','settings','admins','telecallers','call_logs','push_tokens','share_events','profile_requests','member_profiles']
   loop
     execute format('alter table %I enable row level security', t);
     execute format('drop policy if exists admin_all on %I', t);

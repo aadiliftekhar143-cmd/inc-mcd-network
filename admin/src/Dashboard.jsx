@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Stars, IconText, Pts, Star, Download, BarChart3, Building2, Trophy, ClipboardList, Medal, TriangleAlert } from './icons.jsx';
 import * as XLSX from 'xlsx';
 import { supabase, fetchAll, istToday, fmt, pct, wardLabel, timeAgo, heatClass, dayLabel, getMemberRating, getWardRating } from './lib.js';
 import MemberUploads from './MemberUploads.jsx';
@@ -267,7 +268,7 @@ export default function Dashboard() {
 
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <button className="btn" style={{ minHeight: 38, padding: '6px 14px', fontSize: 13 }} onClick={exportPerformanceReport}>
-            📥 Export Performance & Ratings
+            <IconText icon={Download}>Export Performance & Ratings</IconText>
           </button>
           <span className="muted" style={{ fontSize: 12 }}>{updated ? 'Updated ' + updated.toLocaleTimeString('en-IN') : 'Loading…'}</span>
         </div>
@@ -277,7 +278,7 @@ export default function Dashboard() {
       <section className="kpis" aria-label="Key numbers">
         <div className="card kpi" style={{ borderLeft: '4px solid #F59E0B' }}>
           <div className="l">Total Campaign Points</div>
-          <div className="v" style={{ color: '#B45309' }}>🌟 {fmt(totalPoints)}</div>
+          <div className="v" style={{ color: '#B45309', display: 'flex', alignItems: 'center', gap: 6 }}><Star size={24} fill="currentColor" />{fmt(totalPoints)}</div>
           <div className="s">{scoped.length ? Math.round(totalPoints / scoped.length) + ' avg pts / member' : '0 pts'}</div>
         </div>
         <Kpi l="Registered members" v={fmt(scoped.length)} s={ward === 'all' ? (selectedDistrict === 'all' ? '250 wards' : selectedDistrict) : wardLabel(ward)} />
@@ -287,7 +288,7 @@ export default function Dashboard() {
         <div className="card kpi" style={{ borderLeft: '4px solid #10B981' }}>
           <div className="l">Top District</div>
           <div className="v" style={{ fontSize: 20, marginTop: 10 }}>{topDistrict ? topDistrict.name : '–'}</div>
-          <div className="s">{topDistrict ? `${topDistrict.avg}% completion · 🌟 ${fmt(topDistrict.totalPoints)} pts` : ''}</div>
+          <div className="s">{topDistrict ? `${topDistrict.avg}% completion · ${fmt(topDistrict.totalPoints)} pts` : ''}</div>
         </div>
       </section>
 
@@ -302,19 +303,19 @@ export default function Dashboard() {
               All <span className="cnt">{starCounts.total}</span>
             </button>
             <button className={'star-btn ' + (ratingFilter === '5' ? 'on' : '')} onClick={() => setRatingFilter('5')}>
-              <span className="stars">★★★★★</span> 5★ Star Leaders <span className="cnt">{starCounts[5] || 0}</span>
+              <Stars n={5} /> Star Leaders <span className="cnt">{starCounts[5] || 0}</span>
             </button>
             <button className={'star-btn ' + (ratingFilter === '4' ? 'on' : '')} onClick={() => setRatingFilter('4')}>
-              <span className="stars">★★★★☆</span> 4★ Active <span className="cnt">{starCounts[4] || 0}</span>
+              <Stars n={4} /> Active <span className="cnt">{starCounts[4] || 0}</span>
             </button>
             <button className={'star-btn ' + (ratingFilter === '3' ? 'on' : '')} onClick={() => setRatingFilter('3')}>
-              <span className="stars">★★★☆☆</span> 3★ Moderate <span className="cnt">{starCounts[3] || 0}</span>
+              <Stars n={3} /> Moderate <span className="cnt">{starCounts[3] || 0}</span>
             </button>
             <button className={'star-btn ' + (ratingFilter === '2' ? 'on' : '')} onClick={() => setRatingFilter('2')}>
-              <span className="stars">★★☆☆☆</span> 2★ Needs Push <span className="cnt">{starCounts[2] || 0}</span>
+              <Stars n={2} /> Needs Push <span className="cnt">{starCounts[2] || 0}</span>
             </button>
             <button className={'star-btn ' + (ratingFilter === '1' ? 'on' : '')} onClick={() => setRatingFilter('1')}>
-              <span className="stars">★☆☆☆☆</span> 1★ Inactive <span className="cnt">{starCounts[1] || 0}</span>
+              <Stars n={1} /> Inactive <span className="cnt">{starCounts[1] || 0}</span>
             </button>
           </div>
         </div>
@@ -323,16 +324,16 @@ export default function Dashboard() {
       {/* Sub-Navigation Tabs */}
       <div className="tabs-subnav">
         <button className={activeTab === 'overview' ? 'on' : ''} onClick={() => setActiveTab('overview')}>
-          📊 Overview & Heatmap
+          <IconText icon={BarChart3}>Overview & Heatmap</IconText>
         </button>
         <button className={activeTab === 'districts' ? 'on' : ''} onClick={() => setActiveTab('districts')}>
-          🏛 District Performance Matrix ({groups.length})
+          <IconText icon={Building2}>District Performance Matrix ({groups.length})</IconText>
         </button>
         <button className={activeTab === 'leaderboard' ? 'on' : ''} onClick={() => setActiveTab('leaderboard')}>
-          🏆 Points Leaderboard & Ratings
+          <IconText icon={Trophy}>Points Leaderboard & Ratings</IconText>
         </button>
         <button className={activeTab === 'wards' ? 'on' : ''} onClick={() => setActiveTab('wards')}>
-          📋 Ward Performance Scorecard ({wardStats.length})
+          <IconText icon={ClipboardList}>Ward Performance Scorecard ({wardStats.length})</IconText>
         </button>
       </div>
 
@@ -364,14 +365,14 @@ export default function Dashboard() {
                     <div className="zh">
                       <b>{g.name}</b>
                       <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <span className="pts-badge" style={{ fontSize: 10, padding: '1px 5px' }}>🌟 {fmt(g.totalPoints)}</span>
+                        <span className="pts-badge" style={{ fontSize: 10, padding: '1px 5px' }}><Pts size={10}>{fmt(g.totalPoints)}</Pts></span>
                         {g.avg}%
                       </span>
                     </div>
                     <div className="cells">
                       {g.wards.map((w) => (
                         <button key={w.ward_no} className={'cell ' + (tasksToday ? heatClass(metric(w)) : 'hx')}
-                          title={`${wardLabel(w.ward_no)} (${w.district}): ${w.completion}% done, ${w.active}/${w.members} active, 🌟 ${w.points} pts, ${w.videos} videos`}
+                          title={`${wardLabel(w.ward_no)} (${w.district}): ${w.completion}% done, ${w.active}/${w.members} active, ${w.points} pts, ${w.videos} videos`}
                           aria-label={`${wardLabel(w.ward_no)}: ${w.completion}% done`}
                           onClick={() => { setWard(String(w.ward_no)); }} />
                       ))}
@@ -396,7 +397,7 @@ export default function Dashboard() {
                 {groupRank.map((g, i) => (
                   <div key={g.name} style={{ display: 'grid', gridTemplateColumns: '22px 110px minmax(0,1fr) 50px', gap: 8, alignItems: 'center', fontSize: 13 }}>
                     <span className="muted">
-                      {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}
+                      {i < 3 ? <Medal size={16} color={['#D4A017', '#9CA3AF', '#B87333'][i]} aria-label={'Rank ' + (i + 1)} /> : i + 1}
                     </span>
                     <span style={{ fontWeight: 600 }}>{g.name}</span>
                     <span className="bar"><span style={{ width: g.avg + '%', background: g.avg < 40 ? '#C2560A' : '#1B4FA8' }} /></span>
@@ -411,7 +412,7 @@ export default function Dashboard() {
           <div className="row">
             <section className="card grow" style={{ flex: '1 1 450px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                <h2>🏆 Top Performing Wards</h2>
+                <h2><IconText icon={Trophy} size={17} color="#B45309"><span style={{ color: '#14171C' }}>Top Performing Wards</span></IconText></h2>
                 <span className="tag ok">High Activity</span>
               </div>
               <div className="tbl">
@@ -424,10 +425,10 @@ export default function Dashboard() {
                       <tr key={w.ward_no}>
                         <td><b>{wardLabel(w.ward_no)}</b></td>
                         <td className="muted">{w.district}</td>
-                        <td><span className="pts-badge">🌟 {fmt(w.points)}</span></td>
+                        <td><span className="pts-badge"><Pts>{fmt(w.points)}</Pts></span></td>
                         <td><b style={{ color: '#1B4FA8' }}>{w.completion}%</b></td>
                         <td>
-                          <span className="stars">{w.rating.starStr}</span>{' '}
+                          <Stars n={w.rating.stars} />{' '}
                           <span className={w.rating.badgeClass}>{w.rating.grade}</span>
                         </td>
                       </tr>
@@ -439,7 +440,7 @@ export default function Dashboard() {
 
             <section className="card grow" style={{ flex: '1 1 450px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                <h2>⚠️ Needs Attention Wards (Calling List)</h2>
+                <h2><IconText icon={TriangleAlert} size={17} color="#C2560A"><span style={{ color: '#14171C' }}>Needs Attention Wards (Calling List)</span></IconText></h2>
                 <span className="tag no">Low Activity</span>
               </div>
               <div className="tbl">
@@ -452,10 +453,10 @@ export default function Dashboard() {
                       <tr key={w.ward_no}>
                         <td><b>{wardLabel(w.ward_no)}</b></td>
                         <td className="muted">{w.district}</td>
-                        <td><span className="pts-badge">🌟 {fmt(w.points)}</span></td>
+                        <td><span className="pts-badge"><Pts>{fmt(w.points)}</Pts></span></td>
                         <td><b style={{ color: '#C2560A' }}>{w.completion}%</b></td>
                         <td>
-                          <span className="stars">{w.rating.starStr}</span>{' '}
+                          <Stars n={w.rating.stars} />{' '}
                           <span className={w.rating.badgeClass}>{w.rating.grade}</span>
                         </td>
                       </tr>
@@ -522,7 +523,7 @@ export default function Dashboard() {
         <section className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <div>
-              <h2>🏛 District Performance & Rating Matrix</h2>
+              <h2><IconText icon={Building2} size={17}>District Performance & Rating Matrix</IconText></h2>
               <p className="sub">Comparative ranking of all {districtList.length} Delhi districts by points, tasks and response rate.</p>
             </div>
             <button className="btn ghost" onClick={exportPerformanceReport}>Export Matrix</button>
@@ -553,7 +554,7 @@ export default function Dashboard() {
                     <td><b>{g.name}</b></td>
                     <td>{g.wards.length}</td>
                     <td>{fmt(g.totalMembers)}</td>
-                    <td><span className="pts-badge large">🌟 {fmt(g.totalPoints)}</span></td>
+                    <td><span className="pts-badge large"><Pts size={13}>{fmt(g.totalPoints)}</Pts></span></td>
                     <td><b>{g.totalVideos}</b></td>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -562,7 +563,7 @@ export default function Dashboard() {
                       </div>
                     </td>
                     <td>
-                      <span className="stars">{g.rating.starStr}</span>{' '}
+                      <Stars n={g.rating.stars} />{' '}
                       <span className={g.rating.badgeClass}>{g.rating.grade} · {g.rating.label}</span>
                     </td>
                     <td>
@@ -583,7 +584,7 @@ export default function Dashboard() {
         <section className="card">
           <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 10, marginBottom: 12 }}>
             <div>
-              <h2>🏆 Member Points Leaderboard & Ratings</h2>
+              <h2><IconText icon={Trophy} size={17}>Member Points Leaderboard & Ratings</IconText></h2>
               <p className="sub">Ranked by points (100 per share, 100 per photo, 200 per video). Showing top performers.</p>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -624,9 +625,9 @@ export default function Dashboard() {
                     </td>
                     <td>{wardLabel(m.ward_no)}</td>
                     <td className="muted">{m.district || m.zone || '–'}</td>
-                    <td><span className="pts-badge large">🌟 {fmt(m.points || 0)}</span></td>
+                    <td><span className="pts-badge large"><Pts size={13}>{fmt(m.points || 0)}</Pts></span></td>
                     <td>
-                      <span className="stars">{m.rating.starStr}</span>{' '}
+                      <Stars n={m.rating.stars} />{' '}
                       <span className={m.rating.badgeClass}>{m.rating.grade} · {m.rating.label}</span>
                     </td>
                     <td><b>{m.tasks_done}</b></td>
@@ -649,7 +650,7 @@ export default function Dashboard() {
         <section className="card">
           <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 10, marginBottom: 12 }}>
             <div>
-              <h2>📋 Ward Performance Scorecard</h2>
+              <h2><IconText icon={ClipboardList} size={17}>Ward Performance Scorecard</IconText></h2>
               <p className="sub">All 250 wards ranked by completion rate, activity, and total points.</p>
             </div>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -692,7 +693,7 @@ export default function Dashboard() {
                       <td><b>{wardLabel(w.ward_no)}</b></td>
                       <td className="muted">{w.district}</td>
                       <td>{w.members}</td>
-                      <td><span className="pts-badge">🌟 {fmt(w.points)}</span></td>
+                      <td><span className="pts-badge"><Pts>{fmt(w.points)}</Pts></span></td>
                       <td><b>{w.completed}</b></td>
                       <td>{w.videos}</td>
                       <td>
@@ -702,7 +703,7 @@ export default function Dashboard() {
                         </div>
                       </td>
                       <td>
-                        <span className="stars">{w.rating.starStr}</span>{' '}
+                        <Stars n={w.rating.stars} />{' '}
                         <span className={w.rating.badgeClass}>{w.rating.grade}</span>
                       </td>
                       <td>

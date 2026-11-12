@@ -47,6 +47,34 @@ const sameDistrict = (a: unknown, m: Record<string, unknown>) =>
 
 const PLATFORMS = ["x", "facebook", "instagram", "whatsapp"];
 
+// Delhi's 7 Lok Sabha seats, for the profile form.
+const LOK_SABHA = [
+  "चांदनी चौक (Chandni Chowk)", "उत्तर पूर्वी दिल्ली (North East Delhi)", "पूर्वी दिल्ली (East Delhi)", "नई दिल्ली (New Delhi)",
+  "उत्तर पश्चिम दिल्ली (North West Delhi)", "पश्चिमी दिल्ली (West Delhi)", "दक्षिणी दिल्ली (South Delhi)",
+];
+
+const PLATFORM_LABEL: Record<string, string> = { facebook: "Facebook", instagram: "Instagram", x: "X (Twitter)", whatsapp: "WhatsApp" };
+
+/** Notification title and text for a task, built from the task itself. Keep in step with taskNotice() in admin/src/lib.js. */
+function taskNotice(t: Record<string, any>) {
+  const desc = String(t.description ?? "").trim();
+  if (t.kind === "share") {
+    const key = ["facebook", "instagram", "x", "whatsapp"].find((k) => t[`link_${k}`]) ?? "facebook";
+    return { title: `नई पोस्ट: ${PLATFORM_LABEL[key]} पर शेयर करें`, body: desc ? `${t.title} · ${desc}`.slice(0, 240) : String(t.title) };
+  }
+  const slots = Number(t.video_slots || 1);
+  return { title: `नया टास्क: ${t.title}`.slice(0, 120), body: desc ? desc.slice(0, 240) : `${slots} वीडियो अपलोड करें, आज रात 11:59 तक।` };
+}
+
+const digits10 = (v: unknown) => {
+  const d = String(v ?? "").replace(/\D/g, "").slice(-10);
+  return /^[6-9]\d{9}$/.test(d) ? d : null;
+};
+const clean = (v: unknown, max = 120) => {
+  const t = String(v ?? "").trim().slice(0, max);
+  return t ? t : null;
+};
+
 // Points. Keep in step with the member_stats view in schema.sql, which is the source of truth for totals.
 const POINTS = { share: 100, photo: 100, video: 200 };
 
@@ -230,6 +258,85 @@ Deno.serve(async (req) => {
       return json({ ok: true, topics });
     }
 
+    // ---- Profile: what the member submitted, what is approved, and the dropdown choices ----
+    if (action === "profile") {
+      const { data: reqs } = await db.from("profile_requests").select("*").eq("mobile", mobile)
+        .order("submitted_at", { ascending: false }).limit(1);
+      const latest = reqs?.[0] ?? null;
+      const { data: approved } = await db.from("member_profiles").select("*").eq("mobile", mobile).maybeSingle();
+      // The member sees their own latest photo straight away, even before approval.
+      const photoPath = latest?.photo_path || approved?.photo_path || null;
+      let photo_url = null;
+      if (photoPath) {
+        const { data: signed } = await db.storage.from("uploads").createSignedUrl(photoPath, 3600);
+        photo_url = signed?.signedUrl ?? null;
+      }
+      if (body.lite) return json({ latest, approved, photo_url });
+      const { data: rows } = await db.from("members").select("ward_no, ward_name, assembly, district, zone").range(0, 9999);
+      const wardNames = new Map<number, string>();
+      for (const r of rows ?? []) if (r.ward_no && r.ward_name && !wardNames.has(r.ward_no)) wardNames.set(r.ward_no, r.ward_name);
+      const uniq = (xs: unknown[]) => [...new Set(xs.map((x) => String(x ?? "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+      return json({
+        latest, approved, photo_url,
+        defaults: {
+          full_name: member.name, ward_no: member.ward_no, assembly: member.assembly ?? null,
+          district: memberDistrict(member) || null, contact_mobile: mobile,
+        },
+        options: {
+          wards: Array.from({ length: 250 }, (_, i) => ({ no: i + 1, name: wardNames.get(i + 1) ?? null })),
+          assemblies: uniq((rows ?? []).map((r) => r.assembly)),
+          districts: uniq((rows ?? []).map((r) => r.district || r.zone)),
+          lok_sabha: LOK_SABHA,
+        },
+      });
+    }
+
+    // ---- Signed URL to upload a square profile photo ----
+    if (action === "profile_photo_url") {
+      const ext = String(body.ext ?? "jpg").replace(/[^a-z0-9]/gi, "").slice(0, 5) || "jpg";
+      if (body.size && Number(body.size) > 8 * 1024 * 1024) return json({ error: "file_too_large", max_mb: 8 }, 400);
+      const path = `profiles/${mobile}/photo-${Date.now()}.${ext}`;
+      const { data, error } = await db.storage.from("uploads").createSignedUploadUrl(path);
+      if (error) throw error;
+      return json({ path, signed_url: data.signedUrl });
+    }
+
+    // ---- Save profile: goes in as a request until an admin approves it ----
+    if (action === "profile_save") {
+      const full_name = clean(body.full_name, 80);
+      if (!full_name) return json({ error: "name_required" }, 400);
+      const ward = Number(body.ward_no);
+      const fam = body.family_members === "" || body.family_members == null ? null : Number(body.family_members);
+      if (fam != null && (!Number.isInteger(fam) || fam < 0 || fam > 50)) return json({ error: "bad_family" }, 400);
+      if (body.contact_mobile && !digits10(body.contact_mobile)) return json({ error: "bad_mobile" }, 400);
+      if (body.alt_mobile && !digits10(body.alt_mobile)) return json({ error: "bad_alt_mobile" }, 400);
+      const photo = clean(body.photo_path, 300);
+      if (photo && !photo.startsWith(`profiles/${mobile}/`)) return json({ error: "bad_path" }, 400);
+      const row = {
+        mobile, full_name,
+        details: clean(body.details, 500),
+        ward_no: ward >= 1 && ward <= 250 ? ward : null,
+        assembly: clean(body.assembly), lok_sabha: clean(body.lok_sabha), district: clean(body.district),
+        family_members: fam,
+        contact_mobile: digits10(body.contact_mobile), alt_mobile: digits10(body.alt_mobile),
+        photo_path: photo,
+        status: "pending", submitted_at: new Date().toISOString(),
+      };
+      // One open request per member: a new save replaces the one still waiting.
+      const { data: open } = await db.from("profile_requests").select("id, photo_path").eq("mobile", mobile).eq("status", "pending")
+        .order("submitted_at", { ascending: false }).limit(1);
+      if (!row.photo_path && open?.[0]?.photo_path) row.photo_path = open[0].photo_path;
+      if (!row.photo_path) {
+        const { data: ap } = await db.from("member_profiles").select("photo_path").eq("mobile", mobile).maybeSingle();
+        row.photo_path = ap?.photo_path ?? null;
+      }
+      const res = open?.[0]
+        ? await db.from("profile_requests").update(row).eq("id", open[0].id).select("*").single()
+        : await db.from("profile_requests").insert(row).select("*").single();
+      if (res.error) throw res.error;
+      return json({ ok: true, request: res.data });
+    }
+
     // ---- Leader messages ----
     if (action === "messages") {
       const { data: msgs } = await db.from("leader_messages").select("*").lte("published_at", new Date().toISOString())
@@ -252,7 +359,7 @@ Deno.serve(async (req) => {
 
       // Find any tasks created for today after 'since'
       const { data: newTasks } = await db.from("tasks")
-        .select("id, title, description, task_date, created_at")
+        .select("id, kind, title, description, video_slots, link_x, link_facebook, link_instagram, link_whatsapp, task_date, created_at")
         .eq("task_date", today)
         .gt("created_at", since)
         .order("created_at", { ascending: false });
@@ -268,7 +375,7 @@ Deno.serve(async (req) => {
       return json({
         pending,
         total: tasks.filter((t) => t.kind === "upload").length,
-        new_tasks: newTasks ?? [],
+        new_tasks: (newTasks ?? []).map((t) => ({ id: t.id, title: t.title, kind: t.kind, notify: taskNotice(t) })),
         announcements: mine,
         new_message: msg?.[0] ?? null,
         reminder_hours: s.reminder_hours,
