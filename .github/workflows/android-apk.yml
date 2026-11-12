@@ -22,28 +22,40 @@ jobs:
         with: { distribution: temurin, java-version: '17' }
       - uses: gradle/actions/setup-gradle@v3
         with: { gradle-version: '8.7' }
-      - name: Build Release APK
+      - name: Read app version
+        id: ver
         run: |
-          if [ -n "${{ secrets.WS_API_URL }}" ]; then
-            gradle assembleRelease -PWS_API_URL="${{ secrets.WS_API_URL }}" -PWS_ANON_KEY="${{ secrets.WS_ANON_KEY }}"
-          else
-            gradle assembleRelease
-          fi
+          echo "name=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)" >> "$GITHUB_OUTPUT"
+          echo "code=$(grep -oP 'versionCode = \K[0-9]+' app/build.gradle.kts)" >> "$GITHUB_OUTPUT"
+      - name: Build Release APK
+        env:
+          WS_API_URL: ${{ secrets.WS_API_URL }}
+          WS_ANON_KEY: ${{ secrets.WS_ANON_KEY }}
+          FCM_APP_ID: ${{ secrets.FCM_APP_ID }}
+          FCM_API_KEY: ${{ secrets.FCM_API_KEY }}
+          FCM_PROJECT_ID: ${{ secrets.FCM_PROJECT_ID }}
+          FCM_SENDER_ID: ${{ secrets.FCM_SENDER_ID }}
+        run: |
+          ARGS=""
+          if [ -n "$WS_API_URL" ]; then ARGS="$ARGS -PWS_API_URL=$WS_API_URL -PWS_ANON_KEY=$WS_ANON_KEY"; fi
+          if [ -n "$FCM_APP_ID" ]; then ARGS="$ARGS -PFCM_APP_ID=$FCM_APP_ID -PFCM_API_KEY=$FCM_API_KEY -PFCM_PROJECT_ID=$FCM_PROJECT_ID -PFCM_SENDER_ID=$FCM_SENDER_ID"; fi
+          gradle assembleRelease $ARGS
       - uses: actions/upload-artifact@v4
         with: { name: ward-sadasya-apk, path: android/app/build/outputs/apk/release/*.apk }
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.2
-          name: "MCD Election 2027 - ACTION APP v1.2"
+          tag_name: v${{ steps.ver.outputs.name }}
+          name: "INC MCD NETWORK v${{ steps.ver.outputs.name }}"
+          make_latest: true
           body: |
-            ### MCD Election 2027 - ACTION APP v1.2 (Build 3)
-            - 🔔 टॉप नोटिफिकेशन सेंटर (Notification Bell Icon & Screen)
-            - 🚀 In-App Auto Update Alert सिस्टम
-            - ✨ पॉइंट्स सिस्टम (Points System & Rankings)
-            - ⭐ 5-स्टार परफॉर्मेंस रेटिंग्स
-            - ⚡ तेज़ वीडियो अपलोड और रीट्राय फिक्स
-            - 🎉 वीडियो सबमिट पर सेलिब्रेशन पॉपअप व ऑटो-होम रिटर्न
+            ### INC MCD NETWORK v${{ steps.ver.outputs.name }} (Build ${{ steps.ver.outputs.code }})
+            - नया नाम: INC MCD NETWORK
+            - ⭐ अंक (पॉइंट्स): हर काम, वीडियो, फोटो और शेयर पर अंक, "मेरे अंक" स्क्रीन
+            - 📣 काम पूरा होने के बाद रीट्वीट, लाइक और शेयर पैनल (X, Facebook, Instagram, WhatsApp ऐप में सीधे खुलते हैं)
+            - 🔔 ज़रूरी सूचनाएं तुरंत (Firebase)
+            - 🧭 नीचे नेविगेशन बार और फुटर
+            - ✨ स्मूद स्क्रीन ट्रांज़िशन और तेज़ होम स्क्रीन
           files: android/app/build/outputs/apk/release/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

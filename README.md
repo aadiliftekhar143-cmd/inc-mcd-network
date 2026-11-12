@@ -1,4 +1,4 @@
-# Ward Sadasya: app + admin panel
+# INC MCD NETWORK (Ward Sadasya): app + admin panel
 
 Three parts:
 
@@ -11,6 +11,9 @@ Three parts:
 Setup takes about 45 minutes, in this order.
 
 ---
+
+
+> **Upgrading to v1.3 (INC MCD NETWORK)?** Follow [Upgrade to v1.3](#upgrade-to-v13-inc-mcd-network) at the end. You need to re-run the schema, deploy two new functions and, for instant notifications, set up Firebase.
 
 ## 1. Supabase (about 10 min)
 
@@ -93,3 +96,60 @@ Test these on one real phone:
 ## Storage estimate
 
 At 1,000 active members × about 3 videos × 11 days, roughly 30,000 videos. If videos average 20 to 40 MB, that is about 0.6 to 1.2 TB. Supabase Pro includes 100 GB, and extra storage is billed per GB. Check the current Supabase pricing page before launch.
+
+---
+
+## Upgrade to v1.3 (INC MCD NETWORK)
+
+### What's new
+
+| Area | Change |
+| --- | --- |
+| App | New name **INC MCD NETWORK**. Points (100 per task, 50 per video, 20 per photo, 10 per share) on the home screen and a "मेरे अंक" screen. |
+| App | Share panel after every completed task and on the home screen: Retweet and Like on X, plus Facebook, Instagram and WhatsApp. Links open in the matching app; WhatsApp shares the text directly. |
+| App | Instant high-priority notifications through Firebase, with the 15-minute background check kept as a fallback. |
+| App | Bottom navigation bar (होम, संदेश, सूचनाएं, मेरे अंक) and a footer. Smoother screen transitions; home shows cached data instantly while refreshing. |
+| Admin | **Team** tab: the master admin creates telecallers (name, mobile, password, districts, remarks) and other admins. |
+| Admin | **Calling** tab: telecallers log in with mobile + password and see only their districts' members, sorted by who needs a call (not logged in, inactive, pending today, follow-up due). One-tap call and WhatsApp, call outcome, remarks and follow-up date. |
+| Admin | **Reports** tab: a full report per ward member (every task, video, photo, share and call) plus a task report with share counts. Excel exports. |
+| Admin | Notifications go out instantly; new tasks and leader messages can notify all members on save. |
+| Data | "Zone" is now "District" everywhere. The district list comes from the members Excel, so any number of districts works. |
+
+### Steps
+
+1. **Re-run the schema.** Open Supabase **SQL Editor**, paste all of `supabase/schema.sql` and run it. It is safe on the existing database: it adds the new tables and the `district` columns, copies old zone values into district, and leaves your data alone.
+2. **Turn off public sign-ups.** Supabase **Authentication > Sign In / Providers > Email**: turn off **Allow new users to sign up**. Logins are now created only from the admin panel's Team tab.
+   > [!WARNING]
+   > The old schema made every new sign-up an admin. v1.3 removes that trigger. Check the `admins` table and delete any user you don't recognise.
+3. **Deploy the functions:**
+   ```bash
+   supabase functions deploy app --no-verify-jwt
+   supabase functions deploy push
+   supabase functions deploy admin
+   ```
+   `push` and `admin` keep JWT verification on: only signed-in admins can call them.
+4. **Firebase, for instant notifications (about 15 min):**
+   1. Go to [console.firebase.google.com](https://console.firebase.google.com), **Add project**, and turn off Google Analytics.
+   2. **Add app > Android**, package name `com.coceptual.wardsadasya`, and download `google-services.json`. Don't add the file to the project; just copy four values out of it:
+
+      | gradle.properties / GitHub secret | Value in google-services.json |
+      | --- | --- |
+      | `FCM_APP_ID` | `client[0].client_info.mobilesdk_app_id` |
+      | `FCM_API_KEY` | `client[0].api_key[0].current_key` |
+      | `FCM_PROJECT_ID` | `project_info.project_id` |
+      | `FCM_SENDER_ID` | `project_info.project_number` |
+   3. Put them in `android/gradle.properties`, or add them as GitHub repo secrets with the same names for the cloud build.
+   4. **Project settings > Service accounts > Generate new private key.** Store the whole JSON as a Supabase secret:
+      ```bash
+      supabase secrets set FIREBASE_SERVICE_ACCOUNT="$(cat service-account.json)"
+      ```
+   Without Firebase everything still works; notifications then arrive at the phone's next background check (up to about 15 minutes).
+5. **Build and publish the APK** (v1.3, build 4). After it is out, set **Notifications and links > Android App Latest Version Code** to `4` so older phones see the update prompt.
+6. **Create the telecallers** in the **Team** tab. Each one logs in at the admin panel URL with their mobile number and password.
+
+### Notes
+
+- Telecallers only see members whose district matches one of their districts (case and spaces ignored). Members with no district appear only for admins.
+- Share points count the first tap per task and platform. The app cannot confirm that the member actually retweeted or posted.
+- On phones with aggressive battery savers (Xiaomi, Vivo, Oppo, Realme), ask members to set the app's battery use to "No restrictions" for reliable notifications.
+
