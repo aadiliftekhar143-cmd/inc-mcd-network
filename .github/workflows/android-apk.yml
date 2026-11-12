@@ -1,4 +1,5 @@
 # Optional: builds the APK on GitHub. Add repo secrets WS_API_URL and WS_ANON_KEY,
+# Runs on every push to main that changes android/ or this file.
 # then Actions > Build APK > Run workflow. Download the APK from the run's Artifacts.
 name: Build APK
 on:
