@@ -1,4 +1,4 @@
-// Ward Sadasya app API. One Edge Function, POST JSON { action, ...params }.
+// INC MCD NETWORK app API. One Edge Function, POST JSON { action, ...params }.
 // Deploy with: supabase functions deploy app --no-verify-jwt
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -26,7 +26,7 @@ async function memberFromSession(token: string | null) {
   if (!token) return null;
   const { data } = await db.from("sessions").select("mobile, members(*)").eq("token", token).maybeSingle();
   if (!data || !data.members) return null;
-  const m = data.members as Record<string, unknown>;
+  const m = data.members as unknown as Record<string, unknown>;
   if (!m.active) return null;
   await db.from("members").update({ last_active_at: new Date().toISOString() }).eq("mobile", data.mobile);
   return m;
@@ -39,6 +39,25 @@ async function settings() {
   return s;
 }
 
+// FCM topic names: letters, digits and _ only.
+const slug = (v: unknown) => String(v ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+const memberDistrict = (m: Record<string, unknown>) => String(m.district || m.zone || "").trim();
+const sameDistrict = (a: unknown, m: Record<string, unknown>) =>
+  String(a ?? "").trim().toLowerCase() === memberDistrict(m).toLowerCase();
+
+const PLATFORMS = ["x", "facebook", "instagram", "whatsapp"];
+
+async function memberStats(mobile: string) {
+  const { data } = await db.from("member_stats").select("points, tasks_done, videos, photos, shares").eq("mobile", mobile).maybeSingle();
+  return {
+    points: Number(data?.points ?? 0),
+    tasks_done: Number(data?.tasks_done ?? 0),
+    videos: Number(data?.videos ?? 0),
+    photos: Number(data?.photos ?? 0),
+    shares: Number(data?.shares ?? 0),
+  };
+}
+
 async function tasksForDate(mobile: string, date: string) {
   const { data: tasks } = await db.from("tasks").select("*").eq("task_date", date).order("sort");
   const ids = (tasks ?? []).map((t) => t.id);
@@ -48,6 +67,9 @@ async function tasksForDate(mobile: string, date: string) {
   const { data: done } = ids.length
     ? await db.from("completions").select("task_id").eq("mobile", mobile).in("task_id", ids)
     : { data: [] };
+  const { data: shares } = ids.length
+    ? await db.from("share_events").select("task_id, platform").eq("mobile", mobile).in("task_id", ids)
+    : { data: [] };
   const doneSet = new Set((done ?? []).map((d) => d.task_id));
   return (tasks ?? []).map((t) => {
     const mine = (media ?? []).filter((m) => m.task_id === t.id);
@@ -56,6 +78,7 @@ async function tasksForDate(mobile: string, date: string) {
       videos: mine.filter((m) => m.kind === "video").length,
       photos: mine.filter((m) => m.kind === "photo").length,
       done: doneSet.has(t.id),
+      shared: (shares ?? []).filter((x) => x.task_id === t.id).map((x) => x.platform),
     };
   });
 }
@@ -102,13 +125,14 @@ Deno.serve(async (req) => {
         .order("created_at", { ascending: false }).limit(20);
       const announcements = (allAnn ?? []).filter((a) =>
         (a.ward_no == null || a.ward_no === member.ward_no) &&
-        ((!a.district && !a.zone) ||
-         String(a.district || a.zone || "").trim().toLowerCase() === String(member.district || member.zone || "").trim().toLowerCase())
+        ((!a.district && !a.zone) || sameDistrict(a.district || a.zone, member))
       );
 
       const s = await settings();
       return json({
         member, today: istToday(), date, days, tasks, leader, announcements,
+        stats: await memberStats(mobile),
+        points_rule: { task: 100, video: 50, photo: 20, share: 10 },
         social: { facebook: s.social_facebook, x: s.social_x, instagram: s.social_instagram },
         helpline: s.helpline,
         max_upload_mb: Number(s.max_upload_mb || 50),
@@ -168,8 +192,33 @@ Deno.serve(async (req) => {
       const videos = (media ?? []).filter((m) => m.kind === "video").length;
       const photos = (media ?? []).filter((m) => m.kind === "photo").length;
       if (videos < 1) return json({ error: "need_video" }, 400);
+      const { data: before } = await db.from("completions").select("task_id").eq("mobile", mobile).eq("task_id", taskId).maybeSingle();
       await db.from("completions").upsert({ mobile, task_id: taskId, video_count: videos, photo_count: photos, completed_at: new Date().toISOString() });
-      return json({ ok: true });
+      const earned = before ? 0 : 100 + videos * 50 + photos * 20;
+      return json({ ok: true, earned, stats: await memberStats(mobile) });
+    }
+
+    // ---- Share button tapped (X, Facebook, Instagram, WhatsApp): +10 points once per task and platform ----
+    if (action === "share") {
+      const taskId = Number(body.task_id);
+      const platform = String(body.platform ?? "").toLowerCase();
+      if (!taskId || !PLATFORMS.includes(platform)) return json({ error: "bad_share" }, 400);
+      const { data: t } = await db.from("tasks").select("id").eq("id", taskId).maybeSingle();
+      if (!t) return json({ error: "no_task" }, 404);
+      const { data: existing } = await db.from("share_events").select("platform").eq("mobile", mobile).eq("task_id", taskId).eq("platform", platform).maybeSingle();
+      if (!existing) await db.from("share_events").insert({ mobile, task_id: taskId, platform, action: String(body.share_action ?? "open").slice(0, 20) });
+      return json({ ok: true, earned: existing ? 0 : 10, stats: await memberStats(mobile) });
+    }
+
+    // ---- Register this phone for instant (Firebase) notifications ----
+    if (action === "register_push") {
+      const token = String(body.token ?? "").trim();
+      if (token.length < 20) return json({ error: "bad_token" }, 400);
+      await db.from("push_tokens").upsert({ token, mobile, updated_at: new Date().toISOString() });
+      const topics = ["all", `ward_${member.ward_no}`];
+      const d = slug(memberDistrict(member));
+      if (d) topics.push(`district_${d}`);
+      return json({ ok: true, topics });
     }
 
     // ---- Leader messages ----
@@ -202,8 +251,7 @@ Deno.serve(async (req) => {
       const { data: ann } = await db.from("announcements").select("*").gt("created_at", since).order("created_at");
       const mine = (ann ?? []).filter((a) =>
         (a.ward_no == null || a.ward_no === member.ward_no) &&
-        ((!a.district && !a.zone) ||
-         String(a.district || a.zone || "").trim().toLowerCase() === String(member.district || member.zone || "").trim().toLowerCase()) &&
+        ((!a.district && !a.zone) || sameDistrict(a.district || a.zone, member)) &&
         (!a.only_pending || pending > 0));
       const { data: msg } = await db.from("leader_messages").select("id, title, published_at")
         .gt("published_at", since).lte("published_at", new Date().toISOString()).order("published_at", { ascending: false }).limit(1);
