@@ -47,9 +47,12 @@ class ReminderWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
         val hour = Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata")).get(Calendar.HOUR_OF_DAY)
         if (hour < 7 || hour >= 23) return Result.success() // quiet hours (11 PM to 7 AM IST)
 
+        // Items the admin already pushed instantly through Firebase are not repeated here.
+        val pushReady = Store.pushReady(ctx)
+
         // 1. New tasks created by Admin
         val newTasks = res.optJSONArray("new_tasks")
-        if (newTasks != null) {
+        if (newTasks != null && !pushReady) {
             for (i in 0 until newTasks.length()) {
                 val t = newTasks.getJSONObject(i)
                 val taskId = t.optInt("id", (System.currentTimeMillis() % 10000).toInt())
@@ -68,20 +71,22 @@ class ReminderWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
         if (ann != null) {
             for (i in 0 until ann.length()) {
                 val a = ann.getJSONObject(i)
+                if (pushReady && !a.isNull("pushed_count")) continue
                 val annId = a.optInt("id", i)
-                Notify.show(ctx, 1000 + annId, "वार्ड सदस्य", a.optString("body"))
+                val title = a.optString("title").takeIf { it.isNotBlank() && it != "null" } ?: "INC MCD NETWORK"
+                Notify.show(ctx, 1000 + annId, title, a.optString("body"), urgent = a.optString("priority") == "high")
             }
         }
 
         // 3. Leader video message
-        res.optJSONObject("new_message")?.let {
+        if (!pushReady) res.optJSONObject("new_message")?.let {
             val msgId = it.optInt("id", 2000)
             Notify.show(ctx, 2000 + msgId, "देवेन्द्र यादव जी का संदेश", it.optString("title"))
         }
 
         // 4. Pending tasks reminder
         val pending = res.optInt("pending")
-        if (pending > 0 && (newTasks == null || newTasks.length() == 0)) {
+        if (pending > 0 && (newTasks == null || newTasks.length() == 0 || pushReady)) {
             Notify.show(ctx, 3000, "आज के काम बाकी हैं", "आपके $pending काम बाकी हैं। रात 11:59 तक वीडियो अपलोड करें।")
         }
 
@@ -128,20 +133,30 @@ class ReminderWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
 
 object Notify {
     private const val CHANNEL = "reminders"
+    /** High-priority channel for instant pushes from the admin panel. Must match channel_id in the push function. */
+    const val URGENT = "urgent"
 
     fun createChannel(ctx: Context) {
         if (Build.VERSION.SDK_INT >= 26) {
+            val nm = ctx.getSystemService(NotificationManager::class.java)
             val ch = NotificationChannel(CHANNEL, "काम और घोषणाएं", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "दैनिक काम, नेताजी के संदेश और घोषणाएं"
                 enableVibration(true)
                 enableLights(true)
             }
-            ctx.getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
+            val urgent = NotificationChannel(URGENT, "ज़रूरी सूचनाएं (तुरंत)", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "पार्टी की ओर से तुरंत भेजी गई ज़रूरी सूचनाएं"
+                enableVibration(true)
+                enableLights(true)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+            }
+            nm.createNotificationChannel(ch)
+            nm.createNotificationChannel(urgent)
         }
     }
 
     @SuppressLint("MissingPermission")
-    fun show(ctx: Context, id: Int, title: String, text: String) {
+    fun show(ctx: Context, id: Int, title: String, text: String, urgent: Boolean = false) {
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
@@ -149,14 +164,16 @@ object Notify {
             ctx, id, Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val n = NotificationCompat.Builder(ctx, CHANNEL)
+        val n = NotificationCompat.Builder(ctx, if (urgent) URGENT else CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(open)
             .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(if (urgent) NotificationCompat.PRIORITY_MAX else NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
             .build()
         NotificationManagerCompat.from(ctx).notify(id, n)
