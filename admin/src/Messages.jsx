@@ -4,6 +4,7 @@ import { supabase, fmt, callFn } from './lib.js';
 export default function Messages() {
   const [list, setList] = useState([]);
   const [title, setTitle] = useState('');
+  const [summary, setSummary] = useState('');
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState(null);
@@ -27,12 +28,12 @@ export default function Messages() {
     const path = `${Date.now()}.${ext}`;
     const up = await supabase.storage.from('leader').upload(path, file, { contentType: file.type, upsert: false });
     if (up.error) { setNote({ ok: false, text: up.error.message }); setBusy(false); return; }
-    const { data: msg, error } = await supabase.from('leader_messages').insert({ title, kind, path }).select('id').single();
+    const { data: msg, error } = await supabase.from('leader_messages').insert({ title, summary: summary.trim() || null, kind, path }).select('id').single();
     if (error) setNote({ ok: false, text: error.message });
     else {
       const { data: p } = await callFn('push', { title: 'देवेन्द्र यादव जी का संदेश', body: title, target: 'all', type: 'leader', ref_id: String(msg.id) });
       setNote({ ok: true, text: 'Published. ' + (p?.pushed ? 'Instant notification sent to all members.' : 'Members will see it on the home screen and at their next check-in.') });
-      setTitle(''); setFile(null); e.target.reset(); load();
+      setTitle(''); setSummary(''); setFile(null); e.target.reset(); load();
     }
     setBusy(false);
   };
@@ -51,6 +52,7 @@ export default function Messages() {
         <p className="sub">Landscape video (MP4) or audio (MP3/M4A). Shows on top of every member's home screen.</p>
         <form onSubmit={publish} className="form">
           <label>Title (Hindi)<input type="text" value={title} onChange={(e) => setTitle(e.target.value)} required placeholder="वादों का हिसाब दो, दिल्ली को जवाब दो" /></label>
+          <label>Summary (optional, shown under the title in the app)<textarea rows={3} value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="संदेश का छोटा सार" /></label>
           <label>File<input type="file" accept="video/*,audio/*" onChange={(e) => setFile(e.target.files[0])} required /></label>
           <div style={{ alignSelf: 'end' }}><button className="btn" type="submit" disabled={busy}>{busy ? 'Uploading…' : 'Publish'}</button></div>
         </form>

@@ -56,11 +56,11 @@ class ReminderWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
             for (i in 0 until newTasks.length()) {
                 val t = newTasks.getJSONObject(i)
                 val taskId = t.optInt("id", (System.currentTimeMillis() % 10000).toInt())
-                val title = t.optString("title", "नया काम")
+                val title = t.optString("title", "नया टास्क")
                 Notify.show(
                     ctx,
                     4000 + taskId,
-                    "नया काम: $title",
+                    "नया टास्क: $title",
                     "आज रात 11:59 तक वीडियो अपलोड करें।"
                 )
             }
@@ -87,7 +87,7 @@ class ReminderWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
         // 4. Pending tasks reminder
         val pending = res.optInt("pending")
         if (pending > 0 && (newTasks == null || newTasks.length() == 0 || pushReady)) {
-            Notify.show(ctx, 3000, "आज के काम बाकी हैं", "आपके $pending काम बाकी हैं। रात 11:59 तक वीडियो अपलोड करें।")
+            Notify.show(ctx, 3000, "आज के टास्क बाकी हैं", "आपके $pending टास्क बाकी हैं। रात 11:59 तक वीडियो अपलोड करें।")
         }
 
         // 5. App update notification (system tray)
@@ -139,8 +139,8 @@ object Notify {
     fun createChannel(ctx: Context) {
         if (Build.VERSION.SDK_INT >= 26) {
             val nm = ctx.getSystemService(NotificationManager::class.java)
-            val ch = NotificationChannel(CHANNEL, "काम और घोषणाएं", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "दैनिक काम, नेताजी के संदेश और घोषणाएं"
+            val ch = NotificationChannel(CHANNEL, "टास्क और घोषणाएँ", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "दैनिक टास्क, नेताजी के संदेश और घोषणाएं"
                 enableVibration(true)
                 enableLights(true)
             }
