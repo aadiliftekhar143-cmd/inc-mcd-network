@@ -105,7 +105,7 @@ At 1,000 active members × about 3 videos × 11 days, roughly 30,000 videos. If 
 
 | Area | Change |
 | --- | --- |
-| App | New name **INC MCD NETWORK**. Points (100 per task, 50 per video, 20 per photo, 10 per share) on the home screen and a "मेरे अंक" screen. |
+| App | New name **INC MCD NETWORK**. Points (20 per video, 10 per photo, 15 per share; no points for the tick itself) on the home screen and a "मेरे अंक" screen. |
 | App | Share panel after every completed task and on the home screen: Retweet and Like on X, plus Facebook, Instagram and WhatsApp. Links open in the matching app; WhatsApp shares the text directly. |
 | App | Instant high-priority notifications through Firebase, with the 15-minute background check kept as a fallback. |
 | App | Bottom navigation bar (होम, संदेश, सूचनाएं, मेरे अंक) and a footer. Smoother screen transitions; home shows cached data instantly while refreshing. |

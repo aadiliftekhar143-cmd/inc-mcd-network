@@ -585,7 +585,7 @@ export default function Dashboard() {
           <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 10, marginBottom: 12 }}>
             <div>
               <h2><IconText icon={Trophy} size={17}>Member Points Leaderboard & Ratings</IconText></h2>
-              <p className="sub">Ranked by points (100 per share, 100 per photo, 200 per video). Showing top performers.</p>
+              <p className="sub">Ranked by points (20 per video, 10 per photo, 15 per share). Showing top performers.</p>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <div className="seg" role="group" aria-label="Ranking scope">

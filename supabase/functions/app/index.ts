@@ -76,7 +76,7 @@ const clean = (v: unknown, max = 120) => {
 };
 
 // Points. Keep in step with the member_stats view in schema.sql, which is the source of truth for totals.
-const POINTS = { share: 100, photo: 100, video: 200 };
+const POINTS = { share: 15, photo: 10, video: 20 };
 
 async function memberStats(mobile: string) {
   const { data } = await db.from("member_stats").select("points, tasks_done, videos, photos, shares").eq("mobile", mobile).maybeSingle();
@@ -168,6 +168,7 @@ Deno.serve(async (req) => {
         stats: await memberStats(mobile),
         points_rule: { ...POINTS, task: 0 },
         social: { facebook: s.social_facebook, x: s.social_x, instagram: s.social_instagram },
+        dpcc_social: { facebook: s.dpcc_facebook, x: s.dpcc_x, instagram: s.dpcc_instagram },
         helpline: s.helpline,
         max_upload_mb: Number(s.max_upload_mb || 50),
         app_update: {
@@ -227,14 +228,15 @@ Deno.serve(async (req) => {
       const videos = (media ?? []).filter((m) => m.kind === "video").length;
       const photos = (media ?? []).filter((m) => m.kind === "photo").length;
       if (videos < 1) return json({ error: "need_video" }, 400);
-      const { data: before } = await db.from("completions").select("task_id").eq("mobile", mobile).eq("task_id", taskId).maybeSingle();
+      const { data: before } = await db.from("completions").select("video_count, photo_count").eq("mobile", mobile).eq("task_id", taskId).maybeSingle();
       await db.from("completions").upsert({ mobile, task_id: taskId, video_count: videos, photo_count: photos, completed_at: new Date().toISOString() });
-      // Points come from uploads and shares; the tick itself earns nothing. Report what this task's uploads are worth.
-      const earned = before ? 0 : videos * POINTS.video + photos * POINTS.photo;
+      // Points come from uploads and shares; the tick itself earns nothing. Report what the uploads added since the last save are worth.
+      const earned = Math.max(0, videos - (before?.video_count ?? 0)) * POINTS.video
+        + Math.max(0, photos - (before?.photo_count ?? 0)) * POINTS.photo;
       return json({ ok: true, earned, stats: await memberStats(mobile) });
     }
 
-    // ---- Share button tapped (X, Facebook, Instagram, WhatsApp): +100 points once per task and platform ----
+    // ---- Share button tapped (X, Facebook, Instagram, WhatsApp): +15 points once per task and platform ----
     if (action === "share") {
       const taskId = Number(body.task_id);
       const platform = String(body.platform ?? "").toLowerCase();
