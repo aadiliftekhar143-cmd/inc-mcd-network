@@ -101,7 +101,7 @@ class ReminderWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
                 Notify.show(
                     ctx,
                     9999,
-                    "🚀 नया अपडेट उपलब्ध है${if (versionName.isNotBlank()) " (v$versionName)" else ""}",
+                    "नया अपडेट उपलब्ध है${if (versionName.isNotBlank()) " (v$versionName)" else ""}",
                     update.optString("notes", "ऐप को नए फ़ीचर्स के लिए अपडेट करें।")
                 )
             }

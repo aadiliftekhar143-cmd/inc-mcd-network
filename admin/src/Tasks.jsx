@@ -62,7 +62,7 @@ export default function Tasks() {
         <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
           <div>
             <h2>Tasks</h2>
-            <p className="sub">Upload tasks need at least 1 video to tick. A share card is for one platform (Facebook, Instagram, X or WhatsApp): pick it, then paste the post link. It shows on the app home screen and right after a member completes a task. Each share earns 100 points. Notifications use the task's own title and details.</p>
+            <p className="sub">Upload tasks need at least 1 video to tick. A share card is for one platform (Facebook, Instagram, X or WhatsApp): pick it, then paste the post link. It shows on the app home screen and right after a member completes a task. Each share earns 15 points. Notifications use the task's own title and details.</p>
           </div>
           <button className="btn" onClick={() => setForm({ ...EMPTY })}>+ New task</button>
         </div>
@@ -97,7 +97,7 @@ export default function Tasks() {
               const p = PLATFORMS.find((x) => x.key === form.platform) || PLATFORMS[0];
               return (
                 <div className="form" style={{ gridTemplateColumns: '1fr', marginTop: 10 }}>
-                  <label>Platform
+                  <label style={{ maxWidth: 260 }}>Platform
                     <select value={p.key} onChange={(e) => setForm({ ...form, platform: e.target.value })}>
                       {PLATFORMS.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
                     </select>

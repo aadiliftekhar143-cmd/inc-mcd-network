@@ -290,7 +290,7 @@ create policy tc_calls_write on call_logs for insert to authenticated
   with check (is_telecaller() and caller_id = auth.uid() and in_my_districts(member_mobile));
 
 -- Per-member totals for rankings, points and the members list.
--- Points: 100 per share (per task and platform) + 100 per photo + 200 per video. Completing a task earns nothing by itself.
+-- Points: 15 per share (per task and platform) + 10 per photo + 20 per video. Completing a task earns nothing by itself.
 drop view if exists member_stats;
 create view member_stats with (security_invoker = true) as
 select m.mobile, m.name, m.ward_no, m.ward_name, m.zone, coalesce(m.district, m.zone) as district, m.assembly, m.active,
@@ -299,7 +299,7 @@ select m.mobile, m.name, m.ward_no, m.ward_name, m.zone, coalesce(m.district, m.
        coalesce(med.videos, 0)   as videos,
        coalesce(med.photos, 0)   as photos,
        coalesce(sh.shares, 0)    as shares,
-       (coalesce(sh.shares, 0) * 100 + coalesce(med.photos, 0) * 100 + coalesce(med.videos, 0) * 200) as points,
+       (coalesce(sh.shares, 0) * 15 + coalesce(med.photos, 0) * 10 + coalesce(med.videos, 0) * 20) as points,
        c.last_completed_at
 from members m
 left join (

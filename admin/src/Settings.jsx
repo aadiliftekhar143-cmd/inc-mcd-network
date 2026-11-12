@@ -14,6 +14,15 @@ const GROUPS = [
     ],
   },
   {
+    title: 'Delhi Pradesh Congress Committee social media',
+    sub: 'Shown in the app under संदेश, below Devender Yadav ji\'s follow buttons.',
+    items: [
+      { key: 'dpcc_facebook', label: 'DPCC Facebook page link', icon: Facebook, type: 'url' },
+      { key: 'dpcc_x', label: 'DPCC X (Twitter) profile link', icon: Twitter, type: 'url' },
+      { key: 'dpcc_instagram', label: 'DPCC Instagram profile link', icon: Instagram, type: 'url' },
+    ],
+  },
+  {
     title: 'Helpline and reminders',
     items: [
       { key: 'helpline', label: 'Helpline number (login screen and app footer)', icon: Phone, type: 'tel' },

@@ -49,6 +49,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -68,6 +69,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -197,7 +202,7 @@ private fun WardApp() {
                     onLogout = logout,
                 )
                 is Screen.Task -> TaskScreen(s.task, s.shares, onBack = goHome, onLogout = logout)
-                is Screen.Messages -> MessagesScreen(nav = nav, helpline = homeData?.str("helpline"), social = homeData?.optJSONObject("social"))
+                is Screen.Messages -> MessagesScreen(nav = nav, helpline = homeData?.str("helpline"), social = homeData?.optJSONObject("social"), dpccSocial = homeData?.optJSONObject("dpcc_social"))
                 is Screen.Notifications -> NotificationsScreen(data = homeData ?: s.data, nav = nav)
                 is Screen.Progress -> ProgressScreen(data = homeData, onData = { homeData = it }, nav = nav, onProfile = { screen = Screen.Profile })
                 is Screen.Profile -> ProfileScreen(onBack = { screen = Screen.Progress }, onLogout = logout)
@@ -321,7 +326,7 @@ private fun LoginScreen(onDone: () -> Unit) {
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = OrangeText),
                                 border = BorderStroke(1.dp, Orange),
                             ) {
-                                Text("📞  हेल्पलाइन पर कॉल करें: $h", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Icon(Icons.Filled.Phone, null, modifier = Modifier.size(17.dp)); Text("  हेल्पलाइन पर कॉल करें: $h", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             }
                         }
                     }
@@ -370,7 +375,7 @@ private fun LoginScreen(onDone: () -> Unit) {
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Green),
                 ) {
-                    Text("आगे बढ़ें  ➔", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text("आगे बढ़ें  ", fontSize = 18.sp, fontWeight = FontWeight.Bold); Icon(Icons.AutoMirrored.Filled.ArrowForward, null)
                 }
 
                 TextButton(
@@ -633,19 +638,19 @@ private fun HomeScreen(
                                 Modifier.fillMaxWidth().padding(start = 18.dp, end = 12.dp, top = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Box(
-                                    Modifier.size(width = 18.dp, height = 12.dp).clip(RoundedCornerShape(2.dp))
-                                        .background(Brush.verticalGradient(0f to Orange, 0.33f to Orange, 0.33f to Color.White, 0.66f to Color.White, 0.66f to Green, 1f to Green)),
+                                Image(
+                                    painterResource(R.drawable.logo), contentDescription = "कांग्रेस",
+                                    modifier = Modifier.size(28.dp).clip(CircleShape).background(Color.White),
                                 )
-                                Text(APP_NAME, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp,
+                                Text(APP_NAME, color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.8.sp,
                                     modifier = Modifier.padding(start = 8.dp).weight(1f))
                                 GlassButton(Icons.Filled.Refresh, "रीफ्रेश") { reload++ }
                                 Spacer(Modifier.width(8.dp))
                                 GlassButton(Icons.AutoMirrored.Filled.Logout, "नंबर बदलें", onLogout)
                             }
                             Column(Modifier.align(Alignment.TopStart).fillMaxWidth(0.52f).padding(start = 18.dp, top = 58.dp)) {
-                                Text("नमस्ते,", color = Color(0xFFAFC0E3), fontSize = 13.sp)
-                                Text("${member.optString("name")} जी", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, lineHeight = 29.sp)
+                                Text("Namaste,", color = Color(0xFFAFC0E3), fontSize = 13.sp)
+                                Text("${member.optString("name").trim()} Ji", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, lineHeight = 29.sp)
                                 Row(
                                     Modifier.padding(top = 6.dp).clip(RoundedCornerShape(50)).background(Color(0x1FFFFFFF))
                                         .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(50)).padding(horizontal = 9.dp, vertical = 3.dp),
@@ -772,7 +777,7 @@ private fun HomeScreen(
                             }
                             uploadTasks.forEach { t ->
                                 HorizontalDivider(color = Color(0xFFF0F2F6))
-                                TaskRow(t, perVideo = rule.optInt("video", 200)) { onTask(t, shareTasks) }
+                                TaskRow(t, perVideo = rule.optInt("video", PTS_VIDEO)) { onTask(t, shareTasks) }
                             }
                         }
                     }
@@ -783,7 +788,7 @@ private fun HomeScreen(
             item(key = "social") {
                 Column(Modifier.padding(top = 26.dp)) {
                     SectionTitle("देवेन्द्र यादव जी के पोस्ट", Modifier.padding(horizontal = 16.dp))
-                    SocialPosts(shareTasks, d.optJSONObject("social"), perShare = rule.optInt("share", 100)) { reload++ }
+                    SocialPosts(shareTasks, d.optJSONObject("social"), perShare = rule.optInt("share", PTS_SHARE)) { reload++ }
                 }
             }
 
@@ -890,15 +895,16 @@ private fun SocialPosts(shareTasks: List<JSONObject>, social: JSONObject?, perSh
     val posts = shareTasks.filter { it.str("link_${p.key}") != null }
 
     Row(
-        Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFFE7EBF2)).padding(4.dp),
+        Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color.White)
+            .border(1.dp, Line, RoundedCornerShape(14.dp)).padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         PLATFORMS.forEach { item ->
             val on = item.key == platform
             Text(
                 item.label, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
-                color = if (on) Ink else Color(0xFF55607A),
-                modifier = Modifier.weight(1f).clip(RoundedCornerShape(11.dp)).background(if (on) Color.White else Color.Transparent)
+                color = if (on) Color.White else Navy,
+                modifier = Modifier.weight(1f).clip(RoundedCornerShape(11.dp)).background(if (on) Navy else Color.Transparent)
                     .clickable { platform = item.key }.padding(vertical = 8.dp),
             )
         }
@@ -1083,65 +1089,82 @@ private fun AppFooter(helpline: String?) {
     }
 }
 
-private data class ShareBtn(val label: String, val platform: String, val url: String, val action: String, val color: Color)
-
 private val FbBlue = Color(0xFF1877F2)
 private val IgPink = Color(0xFFC13584)
 private val WaGreen = Color(0xFF128C7E)
 
-/** Retweet / like / share buttons for one share card. Each first tap per platform earns points (set on the server). */
+// Points per action. The server sends the live values in points_rule; these are only fallbacks.
+private const val PTS_VIDEO = 20
+private const val PTS_PHOTO = 10
+private const val PTS_SHARE = 15
+
+/** One post on one platform that the member can still share. */
+private data class ShareItem(val taskId: Long, val caption: String, val platform: String, val url: String, val action: String)
+
+/** Every (post, platform) pair in these share cards that the member has not shared yet. */
+private fun pendingShares(tasks: List<JSONObject>): List<ShareItem> = tasks.flatMap { t ->
+    val shared = t.optJSONArray("shared")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
+    listOf("facebook", "x", "instagram", "whatsapp").mapNotNull { p ->
+        val url = t.str("link_$p") ?: return@mapNotNull null
+        if (p in shared) return@mapNotNull null
+        val action = when {
+            p == "x" && Social.tweetId(url) != null -> "retweet"
+            p == "whatsapp" -> "share"
+            else -> "open"
+        }
+        ShareItem(t.optLong("id"), t.optString("title"), p, url, action)
+    }
+}
+
+/** Share buttons in a 2-column grid, each with the post's caption. */
 @Composable
-private fun SharePanel(t: JSONObject) {
+private fun ShareGrid(items: List<ShareItem>) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    val taskId = t.optLong("id")
-    var shared by remember(taskId) {
-        mutableStateOf(t.optJSONArray("shared")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet())
-    }
-    val x = t.str("link_x")
-    val fb = t.str("link_facebook")
-    val ig = t.str("link_instagram")
-    val wa = t.str("link_whatsapp")
-
-    val buttons = buildList {
-        if (x != null) {
-            if (Social.tweetId(x) != null) {
-                add(ShareBtn("रीट्वीट", "x", x, "retweet", Ink))
-                add(ShareBtn("लाइक", "x", x, "like", Color(0xFF3B4250)))
-            } else add(ShareBtn("X पर देखें", "x", x, "open", Ink))
-        }
-        if (fb != null) add(ShareBtn("Facebook", "facebook", fb, "open", FbBlue))
-        if (ig != null) add(ShareBtn("Instagram", "instagram", ig, "open", IgPink))
-        if (wa != null) add(ShareBtn("WhatsApp", "whatsapp", wa, "share", WaGreen))
-    }
-
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        buttons.chunked(3).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.forEach { b ->
-                    val isDone = b.platform in shared
-                    Button(
-                        onClick = {
-                            Social.open(ctx, b.platform, b.url, b.action)
-                            scope.launch {
-                                try {
-                                    val r = Api.call(ctx, "share", JSONObject().put("task_id", taskId).put("platform", b.platform).put("share_action", b.action))
-                                    if (r.optInt("earned") > 0) Toast.makeText(ctx, "+${r.optInt("earned")} अंक मिले", Toast.LENGTH_SHORT).show()
-                                    shared = shared + b.platform
-                                } catch (e: Exception) {
-                                }
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = b.color),
-                        contentPadding = PaddingValues(horizontal = 4.dp),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.weight(1f).height(44.dp),
+    var tapped by remember { mutableStateOf(setOf<String>()) }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        items.chunked(2).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.height(IntrinsicSize.Min)) {
+                row.forEach { item ->
+                    val key = "${item.taskId}:${item.platform}"
+                    val done = key in tapped
+                    val (label, color, icon) = when (item.platform) {
+                        "facebook" -> Triple("Facebook", FbBlue, R.drawable.ic_facebook)
+                        "instagram" -> Triple("Instagram", IgPink, R.drawable.ic_instagram)
+                        "x" -> Triple(if (item.action == "retweet") "रीट्वीट" else "X", Ink, R.drawable.ic_x)
+                        else -> Triple("WhatsApp", WaGreen, null)
+                    }
+                    Column(
+                        Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(12.dp)).background(Ground)
+                            .border(1.dp, Line, RoundedCornerShape(12.dp)).padding(8.dp),
+                        verticalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        if (isDone) Icon(Icons.Filled.Check, null, modifier = Modifier.size(16.dp))
-                        Text((if (isDone) " " else "") + b.label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        Text(item.caption, fontSize = 12.sp, color = Color(0xFF3A4560), lineHeight = 16.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                        Button(
+                            onClick = {
+                                Social.open(ctx, item.platform, item.url, item.action)
+                                scope.launch {
+                                    try {
+                                        val r = Api.call(ctx, "share", JSONObject().put("task_id", item.taskId).put("platform", item.platform).put("share_action", item.action))
+                                        if (r.optInt("earned") > 0) Toast.makeText(ctx, "+${r.optInt("earned")} अंक मिले", Toast.LENGTH_SHORT).show()
+                                        tapped = tapped + key
+                                    } catch (e: Exception) {}
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = if (done) Green else color),
+                            contentPadding = PaddingValues(horizontal = 6.dp), shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.padding(top = 8.dp).fillMaxWidth().height(42.dp),
+                        ) {
+                            when {
+                                done -> Icon(Icons.Filled.Check, null, modifier = Modifier.size(16.dp))
+                                icon != null -> Icon(painterResource(icon), null, modifier = Modifier.size(16.dp))
+                                else -> Icon(Icons.Filled.Share, null, modifier = Modifier.size(16.dp))
+                            }
+                            Text(if (done) " शेयर किया" else " $label", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        }
                     }
                 }
-                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
             }
         }
     }
@@ -1164,6 +1187,9 @@ private fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBack
     var submitting by remember { mutableStateOf(false) }
     var showSuccessDialog by remember { mutableStateOf(false) }
     var earned by remember { mutableIntStateOf(0) }
+    var photoBatch by remember { mutableStateOf<String?>(null) }
+    var freshShares by remember { mutableStateOf(shareTasks) }
+    var perShare by remember { mutableIntStateOf(PTS_SHARE) }
     var totalPoints by remember { mutableIntStateOf(-1) }
     val busy = uploadingKind != null
 
@@ -1182,18 +1208,18 @@ private fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBack
         if (busy) Toast.makeText(ctx, "अपलोड पूरा होने दें", Toast.LENGTH_SHORT).show() else onBack()
     }
 
-    fun upload(uri: Uri, kind: String) {
+    /** Uploads one file and attaches it to the task. Returns false if it should stop a batch. */
+    suspend fun uploadOne(uri: Uri, kind: String): Boolean {
         val mime = ctx.contentResolver.getType(uri) ?: if (kind == "video") "video/mp4" else "image/jpeg"
         val size = Api.fileSize(ctx, uri)
         val maxBytes = 50L * 1024 * 1024 // 50 MB limit for Supabase Storage
         if (size > maxBytes) {
             val mb = (size / (1024 * 1024)).toInt()
             Toast.makeText(ctx, "फाइल $mb MB की है। कृपया 50 MB से छोटी फाइल चुनें।", Toast.LENGTH_LONG).show()
-            return
+            return true
         }
         val ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mime) ?: if (kind == "video") "mp4" else "jpg"
-        uploadingKind = kind; progress = 0f
-        scope.launch {
+        progress = 0f
             try {
                 val u = Api.call(ctx, "upload_url", JSONObject().put("task_id", taskId).put("kind", kind).put("ext", ext).put("size", size))
                 var lastErr: Exception? = null
@@ -1207,12 +1233,16 @@ private fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBack
                 if (!ok) throw lastErr ?: Exception("upload")
                 val r = Api.call(ctx, "attach", JSONObject().put("task_id", taskId).put("kind", kind).put("path", u.getString("path")).put("size", size))
                 r.optJSONObject("task")?.let { videos = it.optInt("videos"); photos = it.optInt("photos") }
+                return true
             } catch (e: ApiError) {
                 val detail = e.body.optString("detail", "")
                 when {
-                    e.code == "unauthorized" -> onLogout()
+                    e.code == "unauthorized" -> { onLogout(); return false }
                     e.code == "not_open_yet" -> Toast.makeText(ctx, "यह टास्क अपनी तारीख पर खुलेगा", Toast.LENGTH_LONG).show()
-                    e.code == "limit_reached" -> Toast.makeText(ctx, "इस टास्क के सभी वीडियो जुड़ चुके हैं", Toast.LENGTH_LONG).show()
+                    e.code == "limit_reached" -> {
+                        Toast.makeText(ctx, if (kind == "video") "इस टास्क के सभी वीडियो जुड़ चुके हैं" else "इस टास्क में ज़्यादा से ज़्यादा 10 फोटो जुड़ सकती हैं", Toast.LENGTH_LONG).show()
+                        return false
+                    }
                     e.code == "file_too_large" || detail.contains("EntityTooLarge", ignoreCase = true) || detail.contains("Payload too large", ignoreCase = true) -> {
                         Toast.makeText(ctx, "फाइल साइज 50 MB से बड़ा है। छोटा वीडियो चुनें।", Toast.LENGTH_LONG).show()
                     }
@@ -1225,12 +1255,33 @@ private fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBack
             } catch (e: Exception) {
                 Toast.makeText(ctx, "इंटरनेट चेक करें और फिर कोशिश करें (${e.message ?: "error"})", Toast.LENGTH_LONG).show()
             }
-            uploadingKind = null; progress = null
+            return false
+    }
+
+    fun upload(uri: Uri, kind: String) {
+        uploadingKind = kind
+        scope.launch { uploadOne(uri, kind); uploadingKind = null; progress = null; photoBatch = null }
+    }
+
+    fun uploadPhotos(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        val room = (10 - photos).coerceAtLeast(0)
+        val list = uris.take(room)
+        if (list.isEmpty()) { Toast.makeText(ctx, "इस टास्क में ज़्यादा से ज़्यादा 10 फोटो जुड़ सकती हैं", Toast.LENGTH_LONG).show(); return }
+        if (uris.size > room) Toast.makeText(ctx, "सिर्फ़ $room और फोटो जुड़ सकती हैं, पहली $room जोड़ी जा रही हैं", Toast.LENGTH_LONG).show()
+        uploadingKind = "photo"
+        scope.launch {
+            for ((i, u) in list.withIndex()) {
+                photoBatch = "${i + 1}/${list.size}"
+                if (!uploadOne(u, "photo")) break
+            }
+            uploadingKind = null; progress = null; photoBatch = null
         }
     }
 
     val pickVideo = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let { upload(it, "video") } }
-    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let { upload(it, "photo") } }
+    // Several photos can be picked at once
+    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris -> uploadPhotos(uris) }
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1247,7 +1298,7 @@ private fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBack
             if (desc.isNotBlank() && desc != "null") Text(desc, fontSize = 14.sp, color = Color(0xFF3B4250))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Chip("आज रात 11:59 तक", OrangeBg, OrangeText)
-                Chip("$slots वीडियो · +200 अंक/वीडियो", Ground, Color(0xFF3B4250))
+                Chip("$slots वीडियो · +$PTS_VIDEO अंक/वीडियो", Ground, Color(0xFF3B4250))
             }
 
             Text("अटैचमेंट", fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
@@ -1275,13 +1326,13 @@ private fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBack
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("फोटो", fontWeight = FontWeight.Bold)
-                            Text(if (photos > 0) "$photos फोटो जुड़ी" else "ज़रूरत हो तो इलाके की समस्या की फोटो जोड़ें", fontSize = 12.sp, color = Muted)
+                            Text(if (photos > 0) "$photos फोटो जुड़ी · एक साथ कई फोटो चुन सकते हैं" else "एक साथ कई फोटो चुन सकते हैं (हर फोटो +$PTS_PHOTO अंक)", fontSize = 12.sp, color = Muted)
                         }
                         OutlinedButton(onClick = { pickPhoto.launch("image/*") }, enabled = !busy, modifier = Modifier.height(44.dp)) {
                             Icon(Icons.Filled.PhotoCamera, null, modifier = Modifier.size(18.dp)); Text("  फोटो जोड़ें", color = Ink)
                         }
                     }
-                    if (uploadingKind == "photo") UploadingRow("फोटो", progress ?: 0f)
+                    if (uploadingKind == "photo") UploadingRow(photoBatch?.let { "फोटो $it" } ?: "फोटो", progress ?: 0f)
                 }
             }
         }
@@ -1300,6 +1351,12 @@ private fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBack
                             val r = Api.call(ctx, "complete", JSONObject().put("task_id", taskId))
                             earned = r.optInt("earned")
                             totalPoints = r.optJSONObject("stats")?.optInt("points", -1) ?: -1
+                            try {
+                                val h = Api.call(ctx, "home", JSONObject().put("date", initial.optString("task_date")))
+                                val a = h.optJSONArray("tasks") ?: JSONArray()
+                                freshShares = (0 until a.length()).map { a.getJSONObject(it) }.filter { it.optString("kind") == "share" }
+                                perShare = h.optJSONObject("points_rule")?.optInt("share", PTS_SHARE) ?: PTS_SHARE
+                            } catch (e: Exception) {}
                             done = true
                             showSuccessDialog = true
                         } catch (e: Exception) {
@@ -1346,7 +1403,7 @@ private fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBack
             },
             title = {
                 Text(
-                    text = "टास्क सफलतापूर्वक जमा हुआ! 🎉",
+                    text = "टास्क सफलतापूर्वक जमा हुआ!",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = Ink,
@@ -1374,7 +1431,11 @@ private fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBack
                         ) {
                             Icon(Icons.Filled.Star, null, tint = Gold, modifier = Modifier.size(20.dp))
                             Text(
-                                (if (earned > 0) " +$earned अंक मिले" else " अंक") + (if (totalPoints >= 0) " · कुल ${fmtNum(totalPoints)}" else ""),
+                                when {
+                                    earned > 0 && totalPoints >= 0 -> " +$earned अंक मिले · कुल ${fmtNum(totalPoints)}"
+                                    earned > 0 -> " +$earned अंक मिले"
+                                    else -> " कुल अंक: ${fmtNum(totalPoints)}"
+                                },
                                 fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF92400E),
                             )
                         }
@@ -1385,22 +1446,23 @@ private fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBack
                             .clip(RoundedCornerShape(10.dp))
                             .background(Ground)
                             .padding(horizontal = 14.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("📹 $videos वीडियो दर्ज", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                        Icon(Icons.Filled.Videocam, null, tint = Ink, modifier = Modifier.size(17.dp))
+                        Text(" $videos वीडियो दर्ज", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ink)
                         if (photos > 0) {
-                            Text("•", color = Muted)
-                            Text("📷 $photos फोटो दर्ज", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                            Text("   •   ", color = Muted)
+                            Icon(Icons.Filled.PhotoCamera, null, tint = Ink, modifier = Modifier.size(16.dp))
+                            Text(" $photos फोटो दर्ज", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ink)
                         }
                     }
-                    if (shareTasks.isNotEmpty()) {
+                    // Only posts this member has not shared yet; once shared they don't come back after the next upload.
+                    val pending = remember(freshShares) { pendingShares(freshShares) }
+                    if (pending.isNotEmpty()) {
                         HorizontalDivider(color = Line)
-                        Text("अब यह कंटेंट शेयर करें (हर शेयर +100 अंक)", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.fillMaxWidth())
-                        shareTasks.take(3).forEach { st ->
-                            Text(st.optString("title"), fontSize = 13.sp, color = Muted, modifier = Modifier.fillMaxWidth(), maxLines = 2)
-                            SharePanel(st)
-                        }
+                        Text("अब यह कंटेंट शेयर करें (हर शेयर +$perShare अंक)", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.fillMaxWidth())
+                        ShareGrid(pending)
                     }
                 }
             },
@@ -1546,7 +1608,7 @@ private fun NotificationsScreen(data: JSONObject, nav: Nav) {
                             val a = announcements.getJSONObject(i)
                             Row(
                                 Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color.White)
-                                    .border(1.dp, Line, RoundedCornerShape(16.dp)).padding(14.dp),
+                                    .border(1.dp, Line, RoundedCornerShape(16.dp)).clickable { nav.home() }.padding(14.dp),
                                 verticalAlignment = Alignment.Top,
                             ) {
                                 IconTile(Icons.Filled.Campaign, OrangeBg, Orange, 40)
@@ -1576,7 +1638,7 @@ private fun NotificationsScreen(data: JSONObject, nav: Nav) {
 // ---------------------------------------------------------------- Leader messages
 
 @Composable
-private fun MessagesScreen(nav: Nav, helpline: String?, social: JSONObject?) {
+private fun MessagesScreen(nav: Nav, helpline: String?, social: JSONObject?, dpccSocial: JSONObject?) {
     val ctx = LocalContext.current
     var list by remember { mutableStateOf<List<JSONObject>?>(null) }
     var current by remember { mutableStateOf<JSONObject?>(null) }
@@ -1665,7 +1727,7 @@ private fun MessagesScreen(nav: Nav, helpline: String?, social: JSONObject?) {
                         }
                     }
                 }
-                FollowLeader(social)
+                FollowLeaderAndDpcc(social, dpccSocial)
                 AppFooter(helpline = helpline)
             }
         }
@@ -1693,9 +1755,9 @@ private fun ProgressScreen(data: JSONObject?, onData: (JSONObject) -> Unit, nav:
     }
     val stats = data?.optJSONObject("stats") ?: JSONObject()
     val rule = data?.optJSONObject("points_rule") ?: JSONObject()
-    val perShare = rule.optInt("share", 100)
-    val perPhoto = rule.optInt("photo", 100)
-    val perVideo = rule.optInt("video", 200)
+    val perShare = rule.optInt("share", PTS_SHARE)
+    val perPhoto = rule.optInt("photo", PTS_PHOTO)
+    val perVideo = rule.optInt("video", PTS_VIDEO)
 
     Scaffold(containerColor = Ground, bottomBar = { BottomBar("progress", nav) }) { inner ->
         Column(Modifier.fillMaxSize().padding(inner)) {
@@ -1709,7 +1771,7 @@ private fun ProgressScreen(data: JSONObject?, onData: (JSONObject) -> Unit, nav:
                     ) {
                         ProfilePhoto(profile?.str("photo_url"), 66, onProfile)
                         Column(Modifier.padding(start = 16.dp).weight(1f)) {
-                            shownName?.let { Text("$it जी", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                            shownName?.let { Text("${it.trim()} Ji", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                             Text("कुल अंक", color = Color(0xFFAFC0E3), fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
                             Text(fmtNum(stats.optInt("points")), color = Color.White, fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, lineHeight = 44.sp)
                         }
@@ -1773,9 +1835,9 @@ private fun PointsRow(icon: ImageVector, bg: Color, fg: Color, label: String, co
 
 // ---------------------------------------------------------------- Follow Devender Yadav ji
 
-/** Facebook, X and Instagram buttons that open the leader's profiles (links set in admin Settings). */
+/** Facebook, X and Instagram follow buttons under a heading. Links are set in admin Settings. */
 @Composable
-private fun FollowLeader(social: JSONObject?) {
+private fun FollowSection(heading: AnnotatedString, social: JSONObject?) {
     val ctx = LocalContext.current
     val items = listOf(
         Triple("facebook", "Facebook", R.drawable.ic_facebook),
@@ -1784,11 +1846,11 @@ private fun FollowLeader(social: JSONObject?) {
     ).mapNotNull { (key, label, icon) -> social?.str(key)?.let { url -> Triple(label, icon, key to url) } }
     if (items.isEmpty()) return
     Column(
-        Modifier.padding(start = 16.dp, end = 16.dp, top = 22.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp))
+        Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp))
             .background(Color.White).border(1.dp, Line, RoundedCornerShape(20.dp)).padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("देवेन्द्र यादव जी के सोशल मीडिया हैंडल्स को फॉलो करें", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Ink, textAlign = TextAlign.Center)
+        Text(heading, fontSize = 15.sp, color = Ink, textAlign = TextAlign.Center, lineHeight = 22.sp)
         Row(Modifier.padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(22.dp)) {
             items.forEach { (label, icon, link) ->
                 val (key, url) = link
@@ -1809,6 +1871,25 @@ private fun FollowLeader(social: JSONObject?) {
             }
         }
     }
+}
+
+@Composable
+private fun FollowLeaderAndDpcc(leader: JSONObject?, dpcc: JSONObject?) {
+    Spacer(Modifier.height(6.dp))
+    FollowSection(
+        buildAnnotatedString {
+            withStyle(SpanStyle(fontWeight = FontWeight.ExtraBold)) { append("माननीय DPCC अध्यक्ष देवेन्द्र यादव जी") }
+            append(" के सोशल मीडिया हैंडल्स को फॉलो करें")
+        },
+        leader,
+    )
+    FollowSection(
+        buildAnnotatedString {
+            withStyle(SpanStyle(fontWeight = FontWeight.ExtraBold)) { append("दिल्ली प्रदेश कांग्रेस कमेटी") }
+            append(" के सोशल मीडिया हैंडल्स को फॉलो करें")
+        },
+        dpcc,
+    )
 }
 
 // ---------------------------------------------------------------- Profile
