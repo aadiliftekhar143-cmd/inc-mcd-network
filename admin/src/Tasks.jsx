@@ -1,7 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { supabase, istToday, dayLabel, callFn } from './lib.js';
+import { supabase, istToday, dayLabel, callFn, PLATFORMS, platformOf, taskNotice } from './lib.js';
+import { Facebook, Instagram, Twitter, MessageCircle } from './icons.jsx';
 
-const EMPTY = { task_date: istToday(), sort: 1, kind: 'upload', title: '', description: '', video_slots: 3, allow_photos: true, link_x: '', link_instagram: '', link_facebook: '', link_whatsapp: '' };
+const PLATFORM_ICON = { facebook: Facebook, instagram: Instagram, x: Twitter, whatsapp: MessageCircle };
+
+const EMPTY = { platform: 'facebook', task_date: istToday(), sort: 1, kind: 'upload', title: '', description: '', video_slots: 3, allow_photos: true, link_x: '', link_instagram: '', link_facebook: '', link_whatsapp: '' };
 const TASK_COLUMNS = ['id', 'task_date', 'sort', 'kind', 'title', 'description', 'video_slots', 'allow_photos', 'link_x', 'link_instagram', 'link_facebook', 'link_whatsapp'];
 
 export default function Tasks() {
@@ -22,7 +25,10 @@ export default function Tasks() {
     e.preventDefault();
     const row = Object.fromEntries(TASK_COLUMNS.filter((k) => k in form).map((k) => [k, form[k]]));
     row.sort = Number(form.sort); row.video_slots = Number(form.video_slots);
-    for (const k of ['link_x', 'link_instagram', 'link_facebook', 'link_whatsapp', 'description']) if (!row[k]) row[k] = null;
+    // A share card is for one platform: keep only that platform's link.
+    for (const p of PLATFORMS) if (row.kind !== 'share' || p.key !== form.platform) row[p.col] = null;
+    if (row.kind === 'share' && !row[PLATFORMS.find((p) => p.key === form.platform).col]) { setMsg('Add the post link for the chosen platform.'); return; }
+    if (!row.description) row.description = null;
     const isNew = !row.id;
     if (isNew) delete row.id;
     const { data: saved, error } = isNew
@@ -31,9 +37,9 @@ export default function Tasks() {
     if (error) { setMsg(error.message); return; }
     let note = 'Task saved.';
     if (isNew && notify && row.task_date === istToday()) {
+      const notice = taskNotice(row);
       const { data, error: pe } = await callFn('push', {
-        title: row.kind === 'share' ? 'आज का वीडियो: देखें और शेयर करें' : 'नया काम: ' + row.title,
-        body: row.kind === 'share' ? row.title : 'आज रात 11:59 तक वीडियो अपलोड करें।',
+        title: notice.title, body: notice.body,
         target: 'all', type: 'task', ref_id: String(saved.id),
       });
       note += pe ? ` Instant notification failed (${pe}); phones will see it at their next check-in.`
@@ -56,7 +62,7 @@ export default function Tasks() {
         <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
           <div>
             <h2>Tasks</h2>
-            <p className="sub">Upload tasks need at least 1 video to tick. Share cards show Retweet, Like, Facebook, Instagram and WhatsApp buttons, on the home screen and right after a member completes a task. Each share earns 10 points.</p>
+            <p className="sub">Upload tasks need at least 1 video to tick. A share card is for one platform (Facebook, Instagram, X or WhatsApp): pick it, then paste the post link. It shows on the app home screen and right after a member completes a task. Each share earns 100 points. Notifications use the task's own title and details.</p>
           </div>
           <button className="btn" onClick={() => setForm({ ...EMPTY })}>+ New task</button>
         </div>
@@ -87,14 +93,24 @@ export default function Tasks() {
                 <input type="checkbox" checked={form.allow_photos} onChange={set('allow_photos')} /> Show the photo section
               </label>
             )}
-            {form.kind === 'share' && (
-              <div className="form">
-                <label>X (Twitter) post link<input type="url" value={form.link_x || ''} onChange={set('link_x')} placeholder="https://x.com/user/status/123…" /></label>
-                <label>Facebook post link<input type="url" value={form.link_facebook || ''} onChange={set('link_facebook')} placeholder="https://www.facebook.com/…" /></label>
-                <label>Instagram post or reel link<input type="url" value={form.link_instagram || ''} onChange={set('link_instagram')} placeholder="https://www.instagram.com/p/…" /></label>
-                <label>WhatsApp message (text and/or link members forward)<textarea rows="2" value={form.link_whatsapp || ''} onChange={set('link_whatsapp')} placeholder="वादों का हिसाब दो, दिल्ली को जवाब दो। देखें: https://…" /></label>
-              </div>
-            )}
+            {form.kind === 'share' && (() => {
+              const p = PLATFORMS.find((x) => x.key === form.platform) || PLATFORMS[0];
+              return (
+                <div className="form" style={{ gridTemplateColumns: '1fr', marginTop: 10 }}>
+                  <label>Platform
+                    <select value={p.key} onChange={(e) => setForm({ ...form, platform: e.target.value })}>
+                      {PLATFORMS.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>{React.createElement(PLATFORM_ICON[p.key], { size: 15 })}{p.field}</span>
+                    {p.key === 'whatsapp'
+                      ? <textarea rows="2" value={form[p.col] || ''} onChange={set(p.col)} placeholder={p.placeholder} required />
+                      : <input type="url" value={form[p.col] || ''} onChange={set(p.col)} placeholder={p.placeholder} required />}
+                  </label>
+                </div>
+              );
+            })()}
             {!form.id && form.task_date === istToday() && (
               <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, marginTop: 10 }}>
                 <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} /> Send an instant notification to all members now
@@ -118,11 +134,11 @@ export default function Tasks() {
                 {tasks.filter((t) => t.task_date === d).map((t) => (
                   <tr key={t.id}>
                     <td>{t.sort}</td>
-                    <td><span className={'tag ' + (t.kind === 'upload' ? 'live' : 'mute')}>{t.kind === 'upload' ? 'Task' : 'Share card'}</span></td>
+                    <td><span className={'tag ' + (t.kind === 'upload' ? 'live' : 'mute')} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>{t.kind === 'upload' ? 'Task' : <>{React.createElement(PLATFORM_ICON[platformOf(t)], { size: 12 })}Share card</>}</span></td>
                     <td><b>{t.title}</b>{t.description && <div className="muted" style={{ fontSize: 12 }}>{t.description}</div>}</td>
                     <td>{t.kind === 'upload' ? t.video_slots : '–'}</td>
                     <td style={{ whiteSpace: 'nowrap' }}>
-                      <button className="btn ghost" style={{ minHeight: 32, padding: '4px 10px', fontSize: 12 }} onClick={() => setForm({ ...t })}>Edit</button>{' '}
+                      <button className="btn ghost" style={{ minHeight: 32, padding: '4px 10px', fontSize: 12 }} onClick={() => setForm({ ...t, platform: platformOf(t) })}>Edit</button>{' '}
                       <button className="btn warn" style={{ minHeight: 32, padding: '4px 10px', fontSize: 12 }} onClick={() => remove(t)}>Delete</button>
                     </td>
                   </tr>

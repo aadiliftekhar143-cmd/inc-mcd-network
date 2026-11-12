@@ -1,22 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { supabase, wardLabel, callFn, fetchAll, districtOf } from './lib.js';
 
-const KEYS = [
-  ['social_facebook', 'Devender Yadav ji Facebook page link'],
-  ['social_x', 'Devender Yadav ji X (Twitter) profile link'],
-  ['social_instagram', 'Devender Yadav ji Instagram profile link'],
-  ['helpline', 'Helpline number shown on the login screen'],
-  ['reminder_hours', 'Reminder hours (24-hour clock, comma separated)'],
-  ['app_version_code', 'Android App Latest Version Code (Integer, e.g. 2)'],
-  ['app_version_name', 'Android App Latest Version Name (e.g. 1.1)'],
-  ['app_download_url', 'APK Download Link URL (e.g. https://ward-sadasya.vercel.app/download.html)'],
-  ['app_update_notes', 'App Update Message shown to members (Hindi)'],
-  ['app_update_mandatory', 'Mandatory update? (true / false)'],
-];
 
 export default function Reminders() {
-  const [settings, setSettings] = useState({});
-  const [saved, setSaved] = useState('');
   const [ann, setAnn] = useState([]);
   const [body, setBody] = useState('');
   const [target, setTarget] = useState('all');
@@ -28,8 +14,6 @@ export default function Reminders() {
   const [districts, setDistricts] = useState([]);
 
   const load = async () => {
-    const { data } = await supabase.from('settings').select('*');
-    setSettings(Object.fromEntries((data || []).map((r) => [r.key, r.value || ''])));
     const { data: a } = await supabase.from('announcements').select('*').order('created_at', { ascending: false }).limit(30);
     setAnn(a || []);
   };
@@ -37,13 +21,6 @@ export default function Reminders() {
     load();
     fetchAll('members', 'district, zone').then((rows) => setDistricts([...new Set(rows.map(districtOf).filter(Boolean))].sort()));
   }, []);
-
-  const saveSettings = async (e) => {
-    e.preventDefault();
-    const rows = KEYS.map(([key]) => ({ key, value: settings[key] || '' }));
-    const { error } = await supabase.from('settings').upsert(rows);
-    setSaved(error ? error.message : 'Saved. The app picks this up on next open.');
-  };
 
   const send = async (e) => {
     e.preventDefault();
@@ -88,7 +65,7 @@ export default function Reminders() {
               {districts.map((d) => <option key={d} value={d}>{d}</option>)}
             </select></label>}
           <label>Title (optional)<input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="INC MCD NETWORK" /></label>
-          <label style={{ gridColumn: '1 / -1' }}>Message (Hindi)<textarea rows="2" value={body} onChange={(e) => setBody(e.target.value)} required placeholder="आज के काम रात 11:59 तक पूरे करें" /></label>
+          <label style={{ gridColumn: '1 / -1' }}>Message (Hindi)<textarea rows="2" value={body} onChange={(e) => setBody(e.target.value)} required placeholder="आज के टास्क रात 11:59 तक पूरे करें" /></label>
           <div><button className="btn" type="submit" disabled={sending}>{sending ? 'Sending…' : 'Send now'}</button></div>
         </form>
         {result && <div className={'notice' + (result.ok ? ' ok' : '')} style={{ marginTop: 12 }}>{result.text}</div>}
@@ -105,16 +82,6 @@ export default function Reminders() {
         </div>
       </section>
 
-      <section className="card">
-        <h2>Links and settings</h2>
-        <form onSubmit={saveSettings} className="form">
-          {KEYS.map(([k, label]) => (
-            <label key={k}>{label}<input type="text" value={settings[k] || ''} onChange={(e) => setSettings({ ...settings, [k]: e.target.value })} /></label>
-          ))}
-          <div style={{ alignSelf: 'end' }}><button className="btn" type="submit">Save</button></div>
-        </form>
-        {saved && <div className="notice ok" style={{ marginTop: 12 }}>{saved}</div>}
-      </section>
     </>
   );
 }
