@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { supabase, fmt } from './lib.js';
+import { supabase, fmt, callFn } from './lib.js';
 
 export default function Messages() {
   const [list, setList] = useState([]);
@@ -27,9 +27,13 @@ export default function Messages() {
     const path = `${Date.now()}.${ext}`;
     const up = await supabase.storage.from('leader').upload(path, file, { contentType: file.type, upsert: false });
     if (up.error) { setNote({ ok: false, text: up.error.message }); setBusy(false); return; }
-    const { error } = await supabase.from('leader_messages').insert({ title, kind, path });
+    const { data: msg, error } = await supabase.from('leader_messages').insert({ title, kind, path }).select('id').single();
     if (error) setNote({ ok: false, text: error.message });
-    else { setNote({ ok: true, text: 'Published. Members will see it on the home screen and at the next reminder check.' }); setTitle(''); setFile(null); e.target.reset(); load(); }
+    else {
+      const { data: p } = await callFn('push', { title: 'देवेन्द्र यादव जी का संदेश', body: title, target: 'all', type: 'leader', ref_id: String(msg.id) });
+      setNote({ ok: true, text: 'Published. ' + (p?.pushed ? 'Instant notification sent to all members.' : 'Members will see it on the home screen and at their next check-in.') });
+      setTitle(''); setFile(null); e.target.reset(); load();
+    }
     setBusy(false);
   };
 

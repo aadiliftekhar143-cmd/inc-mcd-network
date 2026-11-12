@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { supabase, istToday, dayLabel } from './lib.js';
+import { supabase, istToday, dayLabel, callFn } from './lib.js';
 
 const EMPTY = { task_date: istToday(), sort: 1, kind: 'upload', title: '', description: '', video_slots: 3, allow_photos: true, link_x: '', link_instagram: '', link_facebook: '', link_whatsapp: '' };
+const TASK_COLUMNS = ['id', 'task_date', 'sort', 'kind', 'title', 'description', 'video_slots', 'allow_photos', 'link_x', 'link_instagram', 'link_facebook', 'link_whatsapp'];
 
 export default function Tasks() {
   const [tasks, setTasks] = useState([]);
   const [form, setForm] = useState(null);
   const [msg, setMsg] = useState('');
+  const [notify, setNotify] = useState(true);
 
   const load = async () => {
     const { data } = await supabase.from('tasks').select('*').order('task_date').order('sort');
@@ -18,11 +20,26 @@ export default function Tasks() {
 
   const save = async (e) => {
     e.preventDefault();
-    const row = { ...form, sort: Number(form.sort), video_slots: Number(form.video_slots) };
+    const row = Object.fromEntries(TASK_COLUMNS.filter((k) => k in form).map((k) => [k, form[k]]));
+    row.sort = Number(form.sort); row.video_slots = Number(form.video_slots);
     for (const k of ['link_x', 'link_instagram', 'link_facebook', 'link_whatsapp', 'description']) if (!row[k]) row[k] = null;
-    const { error } = row.id ? await supabase.from('tasks').update(row).eq('id', row.id) : await supabase.from('tasks').insert(row);
+    const isNew = !row.id;
+    if (isNew) delete row.id;
+    const { data: saved, error } = isNew
+      ? await supabase.from('tasks').insert(row).select('id').single()
+      : await supabase.from('tasks').update(row).eq('id', row.id).select('id').single();
     if (error) { setMsg(error.message); return; }
-    setMsg('Task saved & notification sent.'); setForm(null); load();
+    let note = 'Task saved.';
+    if (isNew && notify && row.task_date === istToday()) {
+      const { data, error: pe } = await callFn('push', {
+        title: row.kind === 'share' ? 'आज का वीडियो: देखें और शेयर करें' : 'नया काम: ' + row.title,
+        body: row.kind === 'share' ? row.title : 'आज रात 11:59 तक वीडियो अपलोड करें।',
+        target: 'all', type: 'task', ref_id: String(saved.id),
+      });
+      note += pe ? ` Instant notification failed (${pe}); phones will see it at their next check-in.`
+        : data.pushed ? ' Instant notification sent to all members.' : ' Firebase not set up: phones will see it at their next check-in.';
+    }
+    setMsg(note); setForm(null); load();
   };
 
   const remove = async (t) => {
@@ -39,7 +56,7 @@ export default function Tasks() {
         <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
           <div>
             <h2>Tasks</h2>
-            <p className="sub">Upload tasks need at least 1 video to tick. Share cards are not tasks: they show X, Instagram, Facebook and WhatsApp buttons.</p>
+            <p className="sub">Upload tasks need at least 1 video to tick. Share cards show Retweet, Like, Facebook, Instagram and WhatsApp buttons, on the home screen and right after a member completes a task. Each share earns 10 points.</p>
           </div>
           <button className="btn" onClick={() => setForm({ ...EMPTY })}>+ New task</button>
         </div>
@@ -72,11 +89,16 @@ export default function Tasks() {
             )}
             {form.kind === 'share' && (
               <div className="form">
-                <label>X (Twitter) post link<input type="text" value={form.link_x || ''} onChange={set('link_x')} placeholder="https://x.com/..." /></label>
-                <label>Instagram post link<input type="text" value={form.link_instagram || ''} onChange={set('link_instagram')} /></label>
-                <label>Facebook post link<input type="text" value={form.link_facebook || ''} onChange={set('link_facebook')} /></label>
-                <label>WhatsApp share text or link<input type="text" value={form.link_whatsapp || ''} onChange={set('link_whatsapp')} placeholder="Text members will forward" /></label>
+                <label>X (Twitter) post link<input type="url" value={form.link_x || ''} onChange={set('link_x')} placeholder="https://x.com/user/status/123…" /></label>
+                <label>Facebook post link<input type="url" value={form.link_facebook || ''} onChange={set('link_facebook')} placeholder="https://www.facebook.com/…" /></label>
+                <label>Instagram post or reel link<input type="url" value={form.link_instagram || ''} onChange={set('link_instagram')} placeholder="https://www.instagram.com/p/…" /></label>
+                <label>WhatsApp message (text and/or link members forward)<textarea rows="2" value={form.link_whatsapp || ''} onChange={set('link_whatsapp')} placeholder="वादों का हिसाब दो, दिल्ली को जवाब दो। देखें: https://…" /></label>
               </div>
+            )}
+            {!form.id && form.task_date === istToday() && (
+              <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, marginTop: 10 }}>
+                <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} /> Send an instant notification to all members now
+              </label>
             )}
             <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
               <button className="btn" type="submit">Save</button>

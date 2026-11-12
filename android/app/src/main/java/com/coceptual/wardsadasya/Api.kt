@@ -23,6 +23,11 @@ object Store {
     fun lastPoll(ctx: Context): String? = prefs(ctx).getString("last_poll", null)
     fun setLastPoll(ctx: Context, v: String) = prefs(ctx).edit().putString("last_poll", v).apply()
     fun clear(ctx: Context) = prefs(ctx).edit().clear().apply()
+    fun topics(ctx: Context): Set<String> = prefs(ctx).getStringSet("push_topics", emptySet()) ?: emptySet()
+    fun setTopics(ctx: Context, t: Set<String>) = prefs(ctx).edit().putStringSet("push_topics", t).apply()
+    /** True once this phone is registered for instant (Firebase) notifications. */
+    fun pushReady(ctx: Context): Boolean = prefs(ctx).getBoolean("push_ready", false)
+    fun setPushReady(ctx: Context, v: Boolean) = prefs(ctx).edit().putBoolean("push_ready", v).apply()
 }
 
 class ApiError(val code: String, val body: JSONObject) : Exception(code)

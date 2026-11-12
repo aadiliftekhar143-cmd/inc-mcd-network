@@ -11,10 +11,15 @@ android {
         applicationId = "com.coceptual.wardsadasya"
         minSdk = 24
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
         buildConfigField("String", "API_URL", "\"${project.findProperty("WS_API_URL")}\"")
         buildConfigField("String", "ANON_KEY", "\"${project.findProperty("WS_ANON_KEY")}\"")
+        // Firebase (instant notifications). Leave empty to run without push; values come from gradle.properties or CI secrets.
+        buildConfigField("String", "FCM_APP_ID", "\"${project.findProperty("FCM_APP_ID") ?: ""}\"")
+        buildConfigField("String", "FCM_API_KEY", "\"${project.findProperty("FCM_API_KEY") ?: ""}\"")
+        buildConfigField("String", "FCM_PROJECT_ID", "\"${project.findProperty("FCM_PROJECT_ID") ?: ""}\"")
+        buildConfigField("String", "FCM_SENDER_ID", "\"${project.findProperty("FCM_SENDER_ID") ?: ""}\"")
     }
 
     signingConfigs {
@@ -59,4 +64,5 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.2")
     implementation("androidx.work:work-runtime-ktx:2.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.google.firebase:firebase-messaging:24.0.0")
 }

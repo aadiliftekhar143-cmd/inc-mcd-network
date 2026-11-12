@@ -1,5 +1,5 @@
--- Ward Sadasya: database schema for Supabase
--- Run once in Supabase Dashboard > SQL Editor.
+-- INC MCD NETWORK (Ward Sadasya): database schema for Supabase
+-- Run in Supabase Dashboard > SQL Editor. Safe to re-run on an existing database.
 
 create extension if not exists pgcrypto;
 
@@ -9,7 +9,8 @@ create table if not exists members (
   name          text not null,
   ward_no       int  not null check (ward_no between 1 and 250),
   ward_name     text,
-  zone          text,
+  zone          text,          -- legacy name for district, kept for older rows
+  district      text,          -- MCD district (same as zone)
   assembly      text,
   active        boolean not null default true,
   first_login_at timestamptz,
@@ -17,6 +18,10 @@ create table if not exists members (
   created_at    timestamptz not null default now()
 );
 create index if not exists members_ward_idx on members (ward_no);
+-- Existing databases: add district and copy it from the old zone column.
+alter table members add column if not exists district text;
+update members set district = zone where district is null and zone is not null;
+create index if not exists members_district_idx on members (lower(trim(coalesce(district, zone, ''))));
 
 -- App sessions (no OTP: login by registered mobile number only).
 create table if not exists sessions (
@@ -87,10 +92,15 @@ create table if not exists announcements (
   id         bigserial primary key,
   body       text not null,
   ward_no    int,           -- null = everyone
-  zone       text,          -- null = all zones
+  zone       text,          -- legacy, same as district
+  district   text,          -- null = all districts
   only_pending boolean not null default false,
   created_at timestamptz not null default now()
 );
+alter table announcements add column if not exists district text;
+alter table announcements add column if not exists title text;
+alter table announcements add column if not exists priority text not null default 'high';
+alter table announcements add column if not exists pushed_count int;
 
 -- Leader social links and other settings.
 create table if not exists settings (
@@ -111,31 +121,90 @@ insert into settings (key, value) values
   ('app_update_mandatory', 'false')
 on conflict (key) do nothing;
 
--- Admin users (Supabase Auth users who may use the admin panel).
+-- Admin users (Supabase Auth users who may use the admin panel). These are master admins.
 create table if not exists admins (
   user_id uuid primary key references auth.users(id) on delete cascade,
   label   text
 );
 
--- Automatically promote newly created Supabase Auth users to admins
-create or replace function public.handle_new_admin_user()
-returns trigger as $$
-begin
-  insert into public.admins (user_id, label)
-  values (new.id, new.email)
-  on conflict (user_id) do nothing;
-  return new;
-end;
-$$ language plpgsql security definer;
+-- Telecallers: staff who call ward members. Each one sees only their districts.
+create table if not exists telecallers (
+  user_id    uuid primary key references auth.users(id) on delete cascade,
+  name       text not null,
+  phone      text,
+  remarks    text,
+  districts  text[] not null default '{}',
+  active     boolean not null default true,
+  created_at timestamptz not null default now()
+);
 
+-- Every call a telecaller (or admin) makes to a ward member.
+create table if not exists call_logs (
+  id            bigserial primary key,
+  member_mobile text not null references members(mobile) on delete cascade,
+  caller_id     uuid references auth.users(id) on delete set null,
+  caller_name   text,
+  outcome       text not null check (outcome in ('connected','will_do','not_reachable','switched_off','wrong_number','not_interested','call_back','other')),
+  remarks       text,
+  follow_up     date,
+  created_at    timestamptz not null default now()
+);
+create index if not exists call_logs_member_idx on call_logs (member_mobile, created_at desc);
+create index if not exists call_logs_caller_idx on call_logs (caller_id, created_at desc);
+
+-- Firebase push tokens, one per phone install.
+create table if not exists push_tokens (
+  token      text primary key,
+  mobile     text not null references members(mobile) on delete cascade,
+  updated_at timestamptz not null default now()
+);
+create index if not exists push_tokens_mobile_idx on push_tokens (mobile);
+
+-- Share button taps from the app (X, Facebook, Instagram, WhatsApp). One row per member, task and platform.
+create table if not exists share_events (
+  mobile     text not null references members(mobile) on delete cascade,
+  task_id    bigint not null references tasks(id) on delete cascade,
+  platform   text not null check (platform in ('x','facebook','instagram','whatsapp')),
+  action     text not null default 'open',
+  created_at timestamptz not null default now(),
+  primary key (mobile, task_id, platform)
+);
+
+-- SECURITY: an earlier version promoted every new Supabase Auth user to admin.
+-- With public sign-ups on, anyone could make themselves an admin. Removed.
+-- Admins and telecallers are now created from the admin panel (Team tab).
 drop trigger if exists on_auth_user_created_admin on auth.users;
-create trigger on_auth_user_created_admin
-  after insert on auth.users
-  for each row execute procedure public.handle_new_admin_user();
+drop function if exists public.handle_new_admin_user();
 
 create or replace function is_admin() returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (select 1 from admins where user_id = auth.uid());
+$$;
+
+create or replace function is_telecaller() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from telecallers where user_id = auth.uid() and active);
+$$;
+
+-- Districts of the signed-in telecaller, normalised to lower case.
+create or replace function my_districts() returns text[]
+language sql stable security definer set search_path = public as $$
+  select coalesce((select array_agg(lower(trim(d))) from telecallers t, unnest(t.districts) d
+                   where t.user_id = auth.uid() and t.active), '{}');
+$$;
+
+-- True when the member belongs to one of the signed-in telecaller's districts.
+create or replace function in_my_districts(member_mobile text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from members m
+                 where m.mobile = member_mobile
+                   and lower(trim(coalesce(m.district, m.zone, ''))) = any (my_districts()));
+$$;
+
+-- Who is signed in to the admin panel: 'admin', 'telecaller' or null.
+create or replace function my_role() returns text
+language sql stable security definer set search_path = public as $$
+  select case when is_admin() then 'admin' when is_telecaller() then 'telecaller' else null end;
 $$;
 
 -- Row level security: the app talks only through the Edge Function (service role),
@@ -143,7 +212,7 @@ $$;
 do $$
 declare t text;
 begin
-  foreach t in array array['members','sessions','tasks','media','completions','leader_messages','message_views','announcements','settings','admins']
+  foreach t in array array['members','sessions','tasks','media','completions','leader_messages','message_views','announcements','settings','admins','telecallers','call_logs','push_tokens','share_events']
   loop
     execute format('alter table %I enable row level security', t);
     execute format('drop policy if exists admin_all on %I', t);
@@ -153,20 +222,45 @@ end $$;
 
 -- Public read for app configuration and updates
 drop policy if exists public_read_settings on settings;
-create policy public_read_settings on settings for select to anon using (true);
+create policy public_read_settings on settings for select to anon, authenticated using (true);
+
+-- Telecaller access: read-only on ward members (and their activity) in their own districts,
+-- read their own profile, and log calls for those members.
+drop policy if exists tc_members on members;
+create policy tc_members on members for select to authenticated
+  using (is_telecaller() and lower(trim(coalesce(district, zone, ''))) = any (my_districts()));
+drop policy if exists tc_completions on completions;
+create policy tc_completions on completions for select to authenticated using (is_telecaller() and in_my_districts(mobile));
+drop policy if exists tc_media on media;
+create policy tc_media on media for select to authenticated using (is_telecaller() and in_my_districts(mobile));
+drop policy if exists tc_shares on share_events;
+create policy tc_shares on share_events for select to authenticated using (is_telecaller() and in_my_districts(mobile));
+drop policy if exists tc_tasks on tasks;
+create policy tc_tasks on tasks for select to authenticated using (is_telecaller());
+drop policy if exists tc_self on telecallers;
+create policy tc_self on telecallers for select to authenticated using (user_id = auth.uid());
+drop policy if exists tc_calls_read on call_logs;
+create policy tc_calls_read on call_logs for select to authenticated using (is_telecaller() and in_my_districts(member_mobile));
+drop policy if exists tc_calls_write on call_logs;
+create policy tc_calls_write on call_logs for insert to authenticated
+  with check (is_telecaller() and caller_id = auth.uid() and in_my_districts(member_mobile));
 
 -- Per-member totals for rankings, points and the members list.
-create or replace view member_stats with (security_invoker = true) as
+-- Points: 100 per completed task + 50 per video + 20 per photo + 10 per share (per task and platform).
+drop view if exists member_stats;
+create view member_stats with (security_invoker = true) as
 select m.mobile, m.name, m.ward_no, m.ward_name, m.zone, coalesce(m.district, m.zone) as district, m.assembly, m.active,
        m.first_login_at, m.last_active_at,
        coalesce(c.tasks_done, 0) as tasks_done,
        coalesce(med.videos, 0)   as videos,
        coalesce(med.photos, 0)   as photos,
-       -- Points formula: 100 per completed task + 50 per video + 20 per photo
-       (coalesce(c.tasks_done, 0) * 100 + coalesce(med.videos, 0) * 50 + coalesce(med.photos, 0) * 20) as points
+       coalesce(sh.shares, 0)    as shares,
+       (coalesce(c.tasks_done, 0) * 100 + coalesce(med.videos, 0) * 50 + coalesce(med.photos, 0) * 20
+        + coalesce(sh.shares, 0) * 10) as points,
+       c.last_completed_at
 from members m
 left join (
-  select mobile, count(*) as tasks_done
+  select mobile, count(*) as tasks_done, max(completed_at) as last_completed_at
   from completions group by mobile
 ) c on c.mobile = m.mobile
 left join (
@@ -174,7 +268,31 @@ left join (
          count(*) filter (where kind = 'video') as videos,
          count(*) filter (where kind = 'photo') as photos
   from media group by mobile
-) med on med.mobile = m.mobile;
+) med on med.mobile = m.mobile
+left join (
+  select mobile, count(*) as shares from share_events group by mobile
+) sh on sh.mobile = m.mobile;
+
+-- Latest call per member, for the calling list.
+create or replace view member_last_call with (security_invoker = true) as
+select distinct on (member_mobile)
+       member_mobile as mobile, outcome as last_outcome, remarks as last_remarks,
+       follow_up as next_follow_up, caller_name as last_caller, created_at as last_call_at
+from call_logs
+order by member_mobile, created_at desc;
+
+-- Per-task totals for the task report.
+create or replace view task_stats with (security_invoker = true) as
+select t.id, t.task_date, t.sort, t.kind, t.title,
+       (select count(*) from completions c where c.task_id = t.id) as completed,
+       (select count(*) from media x where x.task_id = t.id and x.kind = 'video') as videos,
+       (select count(*) from media x where x.task_id = t.id and x.kind = 'photo') as photos,
+       (select count(*) from share_events e where e.task_id = t.id) as shares,
+       (select count(*) from share_events e where e.task_id = t.id and e.platform = 'x') as shares_x,
+       (select count(*) from share_events e where e.task_id = t.id and e.platform = 'facebook') as shares_facebook,
+       (select count(*) from share_events e where e.task_id = t.id and e.platform = 'instagram') as shares_instagram,
+       (select count(*) from share_events e where e.task_id = t.id and e.platform = 'whatsapp') as shares_whatsapp
+from tasks t;
 
 -- Storage buckets: private uploads from members, public leader messages.
 insert into storage.buckets (id, name, public, file_size_limit)
