@@ -17,25 +17,20 @@ import Leaders from './Leaders.jsx';
 import MemberTasks from './MemberTasks.jsx';
 import ToPresident from './ToPresident.jsx';
 import Posters from './Posters.jsx';
+import { BarChart3, ClipboardList, Users, UserCheck, Phone, Bell, MessageCircle, ImageIcon, SettingsIcon } from './icons.jsx';
+import { FileText, ListChecks, Network, ShieldCheck, Video, LogOut } from 'lucide-react';
 
 const APP_NAME = 'INC MCD NETWORK';
 
-const ADMIN_TABS = [
-  ['dashboard', 'Analytics'],
-  ['reports', 'Reports'],
-  ['calling', 'Calling'],
-  ['tasks', 'Tasks'],
-  ['members', 'Ward members'],
-  ['messages', 'Leader messages'],
-  ['reminders', 'Notifications'],
-  ['leaders', 'Leaders'],
-  ['membertasks', 'Member tasks'],
-  ['topresident', 'Messages to President'],
-  ['posters', 'Posters'],
-  ['profiles', 'Profile updates'],
-  ['team', 'Team'],
-  ['settings', 'Settings'],
+// Sidebar groups for the admin. Each entry: [id, label, icon].
+const ADMIN_GROUPS = [
+  ['Overview', [['dashboard', 'Analytics', BarChart3], ['reports', 'Reports', FileText]]],
+  ['Field work', [['tasks', 'Tasks', ClipboardList], ['membertasks', 'Member tasks', ListChecks], ['leaders', 'Leaders', Network]]],
+  ['People', [['members', 'Ward members', Users], ['profiles', 'Profile updates', UserCheck], ['calling', 'Calling', Phone], ['team', 'Team', ShieldCheck]]],
+  ['Communication', [['messages', 'Leader messages', Video], ['reminders', 'Notifications', Bell], ['topresident', 'Messages to President', MessageCircle], ['posters', 'Posters', ImageIcon]]],
+  ['Setup', [['settings', 'Settings', SettingsIcon]]],
 ];
+const ADMIN_TABS = ADMIN_GROUPS.flatMap(([, items]) => items);
 const TELECALLER_TABS = [['calling', 'Calling list']];
 
 function Login() {
@@ -302,6 +297,12 @@ function App() {
           <span className="pill"><span className="dot" />{me.name}{me.role === 'telecaller' ? ' · Telecaller' : ' · Admin'}</span>
           <button className="btn ghost" style={{ minHeight: 34, padding: '6px 12px' }} onClick={handleSignOut}>Log out</button>
         </div>
+        {me.role !== 'admin' && (
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <span className="pill light"><span className="dot" />{me.name} · Telecaller</span>
+            <button className="btn ghost" style={{ minHeight: 34, padding: '6px 12px' }} onClick={() => supabase.auth.signOut()}>Log out</button>
+          </div>
+        )}
       </header>
       {tabs.length > 1 && (
         <nav className="nav" aria-label="Admin sections">
@@ -327,6 +328,8 @@ function App() {
         {tab === 'settings' && <Settings />}
       </main>
       <Footer />
+      </div>
+      </div>
     </>
   );
 }
