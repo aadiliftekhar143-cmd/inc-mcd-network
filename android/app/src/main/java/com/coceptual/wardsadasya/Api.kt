@@ -20,6 +20,9 @@ object Store {
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("ward_sadasya", Context.MODE_PRIVATE)
     fun token(ctx: Context): String? = prefs(ctx).getString("token", null)
     fun setToken(ctx: Context, t: String?) = prefs(ctx).edit().putString("token", t).apply()
+    /** member, president, gs, dp or observer. */
+    fun role(ctx: Context): String = prefs(ctx).getString("role", "member") ?: "member"
+    fun setRole(ctx: Context, r: String) = prefs(ctx).edit().putString("role", r).apply()
     fun lastPoll(ctx: Context): String? = prefs(ctx).getString("last_poll", null)
     fun setLastPoll(ctx: Context, v: String) = prefs(ctx).edit().putString("last_poll", v).apply()
     fun clear(ctx: Context) = prefs(ctx).edit().clear().apply()
@@ -42,10 +45,17 @@ object Api {
 
     /** Calls the Supabase Edge Function with { action, ...params }. */
     suspend fun call(ctx: Context, action: String, params: JSONObject = JSONObject()): JSONObject =
+        post(ctx, BuildConfig.API_URL, action, params)
+
+    /** Same, for the leader screens (President, GS, District Presidents, Observers). */
+    suspend fun leader(ctx: Context, action: String, params: JSONObject = JSONObject()): JSONObject =
+        post(ctx, BuildConfig.API_URL.substringBeforeLast("/") + "/leader", action, params)
+
+    private suspend fun post(ctx: Context, url: String, action: String, params: JSONObject): JSONObject =
         withContext(Dispatchers.IO) {
             params.put("action", action)
             val builder = Request.Builder()
-                .url(BuildConfig.API_URL)
+                .url(url)
                 .addHeader("apikey", BuildConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer " + BuildConfig.ANON_KEY)
                 .post(params.toString().toRequestBody("application/json".toMediaType()))

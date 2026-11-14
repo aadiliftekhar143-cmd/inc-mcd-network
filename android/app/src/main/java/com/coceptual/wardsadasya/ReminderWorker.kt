@@ -31,6 +31,8 @@ class ReminderWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
     override suspend fun doWork(): Result {
         val ctx = applicationContext
         if (Store.token(ctx) == null) return Result.success()
+        // Leaders use a different API; this reminder check is for ward members.
+        if (Store.role(ctx) != "member") return Result.success()
         val res = try {
             val p = JSONObject()
             Store.lastPoll(ctx)?.let { p.put("since", it) }
@@ -64,8 +66,17 @@ class ReminderWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
                     4000 + taskId,
                     notice?.optString("title")?.takeIf { it.isNotBlank() } ?: "नया टास्क: $title",
                     notice?.optString("body")?.takeIf { it.isNotBlank() } ?: "आज रात 11:59 तक वीडियो अपलोड करें।",
+                    taskId = t.optLong("id"),
                 )
             }
+        }
+
+        // Personal messages from the DPCC President
+        val inbox = res.optJSONArray("new_inbox")
+        if (inbox != null && inbox.length() > 0) {
+            val first = inbox.getJSONObject(0)
+            Notify.show(ctx, 6000 + first.optInt("id") % 1000, "माननीय DPCC अध्यक्ष जी का संदेश",
+                first.optString("text").takeIf { it.isNotBlank() && it != "null" } ?: "आपके लिए एक वॉइस नोट आया है", inbox = true)
         }
 
         // 2. Announcements
@@ -158,12 +169,13 @@ object Notify {
     }
 
     @SuppressLint("MissingPermission")
-    fun show(ctx: Context, id: Int, title: String, text: String, urgent: Boolean = false) {
+    fun show(ctx: Context, id: Int, title: String, text: String, urgent: Boolean = false, taskId: Long? = null, inbox: Boolean = false) {
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
         val open = PendingIntent.getActivity(
-            ctx, id, Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            ctx, id, Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .apply { taskId?.let { putExtra("open_task", it) }; if (inbox) putExtra("open_inbox", true) },
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val n = NotificationCompat.Builder(ctx, if (urgent) URGENT else CHANNEL)

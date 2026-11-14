@@ -4,7 +4,7 @@ import { Facebook, Instagram, Twitter, MessageCircle } from './icons.jsx';
 
 const PLATFORM_ICON = { facebook: Facebook, instagram: Instagram, x: Twitter, whatsapp: MessageCircle };
 
-const EMPTY = { platform: 'facebook', task_date: istToday(), sort: 1, kind: 'upload', title: '', description: '', video_slots: 3, allow_photos: true, link_x: '', link_instagram: '', link_facebook: '', link_whatsapp: '' };
+const EMPTY = { platform: 'facebook', task_date: istToday(), sort: 1, kind: 'upload', title: '', description: '', video_slots: 2, allow_photos: true, link_x: '', link_instagram: '', link_facebook: '', link_whatsapp: '' };
 const TASK_COLUMNS = ['id', 'task_date', 'sort', 'kind', 'title', 'description', 'video_slots', 'allow_photos', 'link_x', 'link_instagram', 'link_facebook', 'link_whatsapp'];
 
 export default function Tasks() {
@@ -24,7 +24,7 @@ export default function Tasks() {
   const save = async (e) => {
     e.preventDefault();
     const row = Object.fromEntries(TASK_COLUMNS.filter((k) => k in form).map((k) => [k, form[k]]));
-    row.sort = Number(form.sort); row.video_slots = Number(form.video_slots);
+    row.sort = Number(form.sort); row.video_slots = 2; row.allow_photos = true;
     // A share card is for one platform: keep only that platform's link.
     for (const p of PLATFORMS) if (row.kind !== 'share' || p.key !== form.platform) row[p.col] = null;
     if (row.kind === 'share' && !row[PLATFORMS.find((p) => p.key === form.platform).col]) { setMsg('Add the post link for the chosen platform.'); return; }
@@ -62,7 +62,7 @@ export default function Tasks() {
         <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
           <div>
             <h2>Tasks</h2>
-            <p className="sub">Upload tasks need at least 1 video to tick. A share card is for one platform (Facebook, Instagram, X or WhatsApp): pick it, then paste the post link. It shows on the app home screen and right after a member completes a task. Each share earns 15 points. Notifications use the task's own title and details.</p>
+            <p className="sub">Every upload task needs 2 photos and 2 videos, and gives 100 points once all 4 are in. A share card is for one platform (Facebook, Instagram, X or WhatsApp): pick it, then paste the post link. It shows on the app home screen and right after a member completes a task. Each share earns 100 points. Notifications use the task's own title and details.</p>
           </div>
           <button className="btn" onClick={() => setForm({ ...EMPTY })}>+ New task</button>
         </div>
@@ -81,7 +81,7 @@ export default function Tasks() {
                 </select>
               </label>
               {form.kind === 'upload' && (
-                <label>Number of videos (1 to 5)<input type="number" min="1" max="5" value={form.video_slots} onChange={set('video_slots')} /></label>
+                <label>Uploads needed<input value="2 photos + 2 videos (100 points)" disabled /></label>
               )}
             </div>
             <div className="form" style={{ gridTemplateColumns: '1fr' }}>
@@ -90,7 +90,7 @@ export default function Tasks() {
             </div>
             {form.kind === 'upload' && (
               <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, marginTop: 10 }}>
-                <input type="checkbox" checked={form.allow_photos} onChange={set('allow_photos')} /> Show the photo section
+                <input type="checkbox" checked disabled /> Photos are always needed (2)
               </label>
             )}
             {form.kind === 'share' && (() => {
@@ -136,7 +136,7 @@ export default function Tasks() {
                     <td>{t.sort}</td>
                     <td><span className={'tag ' + (t.kind === 'upload' ? 'live' : 'mute')} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>{t.kind === 'upload' ? 'Task' : <>{React.createElement(PLATFORM_ICON[platformOf(t)], { size: 12 })}Share card</>}</span></td>
                     <td><b>{t.title}</b>{t.description && <div className="muted" style={{ fontSize: 12 }}>{t.description}</div>}</td>
-                    <td>{t.kind === 'upload' ? t.video_slots : '–'}</td>
+                    <td>{t.kind === 'upload' ? '2 + 2' : '–'}</td>
                     <td style={{ whiteSpace: 'nowrap' }}>
                       <button className="btn ghost" style={{ minHeight: 32, padding: '4px 10px', fontSize: 12 }} onClick={() => setForm({ ...t, platform: platformOf(t) })}>Edit</button>{' '}
                       <button className="btn warn" style={{ minHeight: 32, padding: '4px 10px', fontSize: 12 }} onClick={() => remove(t)}>Delete</button>

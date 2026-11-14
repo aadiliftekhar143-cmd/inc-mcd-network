@@ -92,20 +92,20 @@ import java.util.Locale
 
 const val APP_NAME = "INC MCD NETWORK"
 
-private val Navy = Color(0xFF0E1B3D)
-private val NavySoft = Color(0xFF172A59)
-private val Blue = Color(0xFF2463D1)
-private val Orange = Color(0xFFF2852B)
-private val OrangeBg = Color(0xFFFFF1E4)
-private val OrangeText = Color(0xFF9A4A0B)
-private val Green = Color(0xFF12884A)
-private val GreenBg = Color(0xFFE6F5EC)
-private val GreenText = Color(0xFF14613A)
-private val Ground = Color(0xFFF2F4F8)
-private val Line = Color(0xFFE3E7EF)
-private val Muted = Color(0xFF6B7590)
-private val Ink = Color(0xFF141C33)
-private val Gold = Color(0xFFF59E0B)
+internal val Navy = Color(0xFF0E1B3D)
+internal val NavySoft = Color(0xFF172A59)
+internal val Blue = Color(0xFF2463D1)
+internal val Orange = Color(0xFFF2852B)
+internal val OrangeBg = Color(0xFFFFF1E4)
+internal val OrangeText = Color(0xFF9A4A0B)
+internal val Green = Color(0xFF12884A)
+internal val GreenBg = Color(0xFFE6F5EC)
+internal val GreenText = Color(0xFF14613A)
+internal val Ground = Color(0xFFF2F4F8)
+internal val Line = Color(0xFFE3E7EF)
+internal val Muted = Color(0xFF6B7590)
+internal val Ink = Color(0xFF141C33)
+internal val Gold = Color(0xFFF59E0B)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -113,11 +113,23 @@ class MainActivity : ComponentActivity() {
         Notify.createChannel(this)
         ReminderWorker.schedule(this)
         Push.register(this)
+        openTask.value = intent?.getLongExtra("open_task", 0L)?.takeIf { it > 0 }
+        openInbox.value = intent?.getBooleanExtra("open_inbox", false) == true
         setContent {
             MaterialTheme(colorScheme = lightColorScheme(primary = Blue, secondary = Orange, background = Ground, surface = Color.White)) {
-                WardApp()
+                WardApp(openTask, openInbox)
             }
         }
+    }
+
+    // Set when the app is opened from a notification: open that task or the inbox.
+    private val openTask = mutableStateOf<Long?>(null)
+    private val openInbox = mutableStateOf(false)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        intent.getLongExtra("open_task", 0L).takeIf { it > 0 }?.let { openTask.value = it }
+        if (intent.getBooleanExtra("open_inbox", false)) openInbox.value = true
     }
 
     override fun onResume() {
@@ -126,7 +138,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private sealed class Screen {
+internal sealed class Screen {
     object Login : Screen()
     object Home : Screen()
     data class Task(val task: JSONObject, val shares: List<JSONObject>) : Screen()
@@ -134,18 +146,24 @@ private sealed class Screen {
     data class Notifications(val data: JSONObject) : Screen()
     object Progress : Screen()
     object Profile : Screen()
+    object Posters : Screen()
+    object Inbox : Screen()
+    object OwnTasks : Screen()
+    object ToPresident : Screen()
 }
 
-private fun depth(s: Screen) = when (s) {
+internal fun depth(s: Screen) = when (s) {
     is Screen.Login -> 0
     is Screen.Home, is Screen.Messages, is Screen.Notifications, is Screen.Progress -> 1
     else -> 2
 }
 
 @Composable
-private fun WardApp() {
+internal fun WardApp(openTask: MutableState<Long?> = mutableStateOf(null), openInbox: MutableState<Boolean> = mutableStateOf(false)) {
     val ctx = LocalContext.current
     var screen by remember { mutableStateOf<Screen>(if (Store.token(ctx) == null) Screen.Login else Screen.Home) }
+    // Leaders (President, GS, District Presidents, Observers) get their own app after login.
+    var role by remember { mutableStateOf(Store.role(ctx)) }
     var homeKey by remember { mutableIntStateOf(0) }
     // Home data is kept here, so going back to Home shows it instantly while it refreshes in the background.
     var homeData by remember { mutableStateOf<JSONObject?>(null) }
@@ -163,9 +181,28 @@ private fun WardApp() {
         Push.unregister(ctx)
         Store.clear(ctx)
         homeData = null
+        role = "member"
         screen = Screen.Login
     }
-    val goHome = { homeKey++; screen = Screen.Home }
+    // Opened from a notification: go straight to that task (or the inbox) once home data is in.
+    LaunchedEffect(openTask.value, homeData) {
+        val id = openTask.value ?: return@LaunchedEffect
+        val d = homeData ?: return@LaunchedEffect
+        val a = d.optJSONArray("tasks") ?: JSONArray()
+        val all = (0 until a.length()).map { a.getJSONObject(it) }
+        all.firstOrNull { it.optLong("id") == id }?.let { t ->
+            if (t.optString("kind") == "upload") screen = Screen.Task(t, all.filter { it.optString("kind") == "share" })
+        }
+        openTask.value = null
+    }
+    LaunchedEffect(openInbox.value) {
+        if (openInbox.value && screen != Screen.Login && role == "member") { screen = Screen.Inbox; openInbox.value = false }
+    }
+    if (screen != Screen.Login && role != "member") {
+        LeaderApp(role = role, onLogout = logout)
+        return
+    }
+    val goHome = { if (screen is Screen.Task || screen is Screen.Profile) homeKey++; screen = Screen.Home }
     val nav = Nav(
         home = goHome,
         messages = { screen = Screen.Messages },
@@ -189,6 +226,7 @@ private fun WardApp() {
         ) { s ->
             when (s) {
                 is Screen.Login -> LoginScreen(onDone = {
+                    role = Store.role(ctx)
                     screen = Screen.Home
                     ReminderWorker.checkNow(ctx)
                     Push.register(ctx)
@@ -200,18 +238,29 @@ private fun WardApp() {
                     nav = nav,
                     onTask = { t, shares -> screen = Screen.Task(t, shares) },
                     onLogout = logout,
+                    onMenu = { item -> screen = when (item) {
+                        "posters" -> Screen.Posters
+                        "inbox" -> Screen.Inbox
+                        "own" -> Screen.OwnTasks
+                        "president" -> Screen.ToPresident
+                        else -> Screen.Profile
+                    } },
                 )
                 is Screen.Task -> TaskScreen(s.task, s.shares, onBack = goHome, onLogout = logout)
                 is Screen.Messages -> MessagesScreen(nav = nav, helpline = homeData?.str("helpline"), social = homeData?.optJSONObject("social"), dpccSocial = homeData?.optJSONObject("dpcc_social"))
-                is Screen.Notifications -> NotificationsScreen(data = homeData ?: s.data, nav = nav)
+                is Screen.Notifications -> NotificationsScreen(data = homeData ?: s.data, nav = nav, onTask = { t, shares -> screen = Screen.Task(t, shares) })
                 is Screen.Progress -> ProgressScreen(data = homeData, onData = { homeData = it }, nav = nav, onProfile = { screen = Screen.Profile })
                 is Screen.Profile -> ProfileScreen(onBack = { screen = Screen.Progress }, onLogout = logout)
+                is Screen.Posters -> PostersScreen(onBack = { screen = Screen.Home })
+                is Screen.Inbox -> InboxScreen(onBack = { screen = Screen.Home })
+                is Screen.OwnTasks -> OwnTasksScreen(onBack = { screen = Screen.Home }, onLogout = logout)
+                is Screen.ToPresident -> ToPresidentScreen(leader = false, onBack = { screen = Screen.Home })
             }
         }
     }
 }
 
-private fun openLink(ctx: Context, url: String) {
+internal fun openLink(ctx: Context, url: String) {
     try {
         val action = if (url.startsWith("tel:")) Intent.ACTION_DIAL else Intent.ACTION_VIEW
         ctx.startActivity(Intent(action, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -220,11 +269,11 @@ private fun openLink(ctx: Context, url: String) {
     }
 }
 
-private fun fmtNum(n: Int): String = NumberFormat.getIntegerInstance(Locale("en", "IN")).format(n)
+internal fun fmtNum(n: Int): String = NumberFormat.getIntegerInstance(Locale("en", "IN")).format(n)
 
-private fun JSONObject.str(key: String): String? = optString(key).takeIf { it.isNotBlank() && it != "null" }
+internal fun JSONObject.str(key: String): String? = optString(key).takeIf { it.isNotBlank() && it != "null" }
 
-private fun dayLabel(date: String): Pair<String, String> {
+internal fun dayLabel(date: String): Pair<String, String> {
     val months = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
     val p = date.split("-")
     return if (p.size == 3) Pair(p[2].trimStart('0'), months[p[1].toInt() - 1]) else Pair(date, "")
@@ -233,7 +282,7 @@ private fun dayLabel(date: String): Pair<String, String> {
 // ---------------------------------------------------------------- Login
 
 @Composable
-private fun LoginScreen(onDone: () -> Unit) {
+internal fun LoginScreen(onDone: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var mobile by remember { mutableStateOf("") }
@@ -242,6 +291,7 @@ private fun LoginScreen(onDone: () -> Unit) {
     var helpline by remember { mutableStateOf<String?>(null) }
     var foundMember by remember { mutableStateOf<JSONObject?>(null) }
     var token by remember { mutableStateOf<String?>(null) }
+    var loginRole by remember { mutableStateOf("member") }
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
         Column(
@@ -290,7 +340,8 @@ private fun LoginScreen(onDone: () -> Unit) {
                             try {
                                 val r = Api.call(ctx, "login", JSONObject().put("mobile", mobile))
                                 token = r.getString("token")
-                                foundMember = r.getJSONObject("member")
+                                loginRole = r.optString("role", "member").ifBlank { "member" }
+                                foundMember = r.optJSONObject("leader") ?: r.getJSONObject("member")
                             } catch (e: ApiError) {
                                 error = if (e.code == "not_registered") "यह नंबर सूची में नहीं मिला।" else "मोबाइल नंबर सही नहीं है।"
                                 helpline = e.body.optString("helpline").ifBlank { null }
@@ -354,6 +405,11 @@ private fun LoginScreen(onDone: () -> Unit) {
                     HorizontalDivider(color = Color(0xFFBBF7D0))
 
                     ProfileField("नाम", m.optString("name"))
+                    if (loginRole != "member") {
+                        ProfileField("पद", ROLE_HI[loginRole] ?: loginRole)
+                        m.str("district")?.let { ProfileField("ज़िला (District)", it) }
+                        m.str("assembly")?.let { ProfileField("विधानसभा", it) }
+                    } else {
                     val wardName = m.optString("ward_name").takeIf { it.isNotBlank() && it != "null" }
                     ProfileField("वार्ड", "वार्ड ${m.optInt("ward_no")}" + (wardName?.let { " ($it)" } ?: ""))
                     val district = (m.optString("district").takeIf { it.isNotBlank() && it != "null" }
@@ -361,6 +417,7 @@ private fun LoginScreen(onDone: () -> Unit) {
                     if (district != null) ProfileField("ज़िला (District)", district)
                     val ac = m.optString("assembly").takeIf { it.isNotBlank() && it != "null" }
                     if (ac != null) ProfileField("विधानसभा", ac)
+                    }
                     ProfileField("मोबाइल", "+91 $mobile")
                 }
 
@@ -368,6 +425,7 @@ private fun LoginScreen(onDone: () -> Unit) {
                     onClick = {
                         token?.let {
                             Store.setToken(ctx, it)
+                            Store.setRole(ctx, loginRole)
                             onDone()
                         }
                     },
@@ -382,6 +440,7 @@ private fun LoginScreen(onDone: () -> Unit) {
                     onClick = {
                         foundMember = null
                         token = null
+                        loginRole = "member"
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -393,7 +452,7 @@ private fun LoginScreen(onDone: () -> Unit) {
 }
 
 @Composable
-private fun ProfileField(label: String, value: String) {
+internal fun ProfileField(label: String, value: String) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, color = Muted, fontSize = 14.sp)
         Text(value, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
@@ -403,10 +462,10 @@ private fun ProfileField(label: String, value: String) {
 
 // ---------------------------------------------------------------- Shared bits
 
-private val HI_MONTHS = listOf("जनवरी", "फ़रवरी", "मार्च", "अप्रैल", "मई", "जून", "जुलाई", "अगस्त", "सितंबर", "अक्टूबर", "नवंबर", "दिसंबर")
-private val HI_WEEKDAYS = listOf("रवि", "सोम", "मंगल", "बुध", "गुरु", "शुक्र", "शनि")
+internal val HI_MONTHS = listOf("जनवरी", "फ़रवरी", "मार्च", "अप्रैल", "मई", "जून", "जुलाई", "अगस्त", "सितंबर", "अक्टूबर", "नवंबर", "दिसंबर")
+internal val HI_WEEKDAYS = listOf("रवि", "सोम", "मंगल", "बुध", "गुरु", "शुक्र", "शनि")
 
-private fun parseYmd(s: String): Calendar? {
+internal fun parseYmd(s: String): Calendar? {
     val p = s.take(10).split("-")
     if (p.size != 3) return null
     return try {
@@ -414,17 +473,17 @@ private fun parseYmd(s: String): Calendar? {
     } catch (e: Exception) { null }
 }
 
-private fun ymd(c: Calendar) =
+internal fun ymd(c: Calendar) =
     String.format(Locale.US, "%04d-%02d-%02d", c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH))
 
 /** "2026-11-12" or an ISO timestamp -> "12 नवंबर 2026". */
-private fun hiDate(s: String?): String {
+internal fun hiDate(s: String?): String {
     val c = s?.let { parseYmd(it) } ?: return ""
     return "${c.get(Calendar.DAY_OF_MONTH)} ${HI_MONTHS[c.get(Calendar.MONTH)]} ${c.get(Calendar.YEAR)}"
 }
 
 /** Continuous run of dates for the strip: back to the first task day (max 30 days), forward 6 days. */
-private fun stripDays(today: String, taskDays: List<String>): List<String> {
+internal fun stripDays(today: String, taskDays: List<String>): List<String> {
     val t = parseYmd(today) ?: return taskDays
     var back = 6
     taskDays.minOrNull()?.takeIf { it < today }?.let { first ->
@@ -437,7 +496,7 @@ private fun stripDays(today: String, taskDays: List<String>): List<String> {
 }
 
 /** True when something in Notifications is new for this member. */
-private fun hasUnread(d: JSONObject): Boolean {
+internal fun hasUnread(d: JSONObject): Boolean {
     val update = d.optJSONObject("app_update")
     val updateAvailable = (update?.optInt("version_code", 1) ?: 1) > BuildConfig.VERSION_CODE
     val leader = d.optJSONObject("leader")
@@ -446,7 +505,7 @@ private fun hasUnread(d: JSONObject): Boolean {
 }
 
 /** Bottom tabs. Shown on Home, Messages, Notifications and Points. */
-private class Nav(
+internal class Nav(
     val home: () -> Unit,
     val messages: () -> Unit,
     val notifications: () -> Unit,
@@ -456,7 +515,7 @@ private class Nav(
 
 /** Navy page header with a back arrow, used on every screen except Home. */
 @Composable
-private fun PageTop(title: String, onBack: () -> Unit) {
+internal fun PageTop(title: String, onBack: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().background(Navy).padding(start = 10.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -470,7 +529,7 @@ private fun PageTop(title: String, onBack: () -> Unit) {
 }
 
 @Composable
-private fun SectionTitle(text: String, modifier: Modifier = Modifier, action: (@Composable () -> Unit)? = null) {
+internal fun SectionTitle(text: String, modifier: Modifier = Modifier, action: (@Composable () -> Unit)? = null) {
     Row(modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(text, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Ink, modifier = Modifier.weight(1f))
         action?.invoke()
@@ -479,7 +538,7 @@ private fun SectionTitle(text: String, modifier: Modifier = Modifier, action: (@
 
 /** Small photo of Devender Yadav ji cut from the home banner, with a play button. */
 @Composable
-private fun LeaderThumb(size: Int, playSize: Int = 34) {
+internal fun LeaderThumb(size: Int, playSize: Int = 34) {
     Box(Modifier.size(size.dp).clip(RoundedCornerShape(14.dp)).background(Navy), contentAlignment = Alignment.Center) {
         Image(
             painterResource(R.drawable.home_banner), contentDescription = null,
@@ -493,7 +552,7 @@ private fun LeaderThumb(size: Int, playSize: Int = 34) {
 }
 
 @Composable
-private fun CardBox(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+internal fun CardBox(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color.White).border(1.dp, Line, RoundedCornerShape(20.dp)),
         content = content,
@@ -501,7 +560,7 @@ private fun CardBox(modifier: Modifier = Modifier, content: @Composable ColumnSc
 }
 
 @Composable
-private fun IconTile(icon: ImageVector, bg: Color, fg: Color, size: Int = 42) {
+internal fun IconTile(icon: ImageVector, bg: Color, fg: Color, size: Int = 42) {
     Box(Modifier.size(size.dp).clip(RoundedCornerShape(13.dp)).background(bg), contentAlignment = Alignment.Center) {
         Icon(icon, null, tint = fg, modifier = Modifier.size((size * 0.5f).dp))
     }
@@ -510,15 +569,17 @@ private fun IconTile(icon: ImageVector, bg: Color, fg: Color, size: Int = 42) {
 // ---------------------------------------------------------------- Home
 
 @Composable
-private fun HomeScreen(
+internal fun HomeScreen(
     cached: JSONObject?,
     onData: (JSONObject) -> Unit,
     refreshKey: Int,
     nav: Nav,
     onTask: (JSONObject, List<JSONObject>) -> Unit,
     onLogout: () -> Unit,
+    onMenu: (String) -> Unit = {},
 ) {
     val ctx = LocalContext.current
+    var menuOpen by remember { mutableStateOf(false) }
     var date by remember { mutableStateOf(cached?.str("date")) }
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
@@ -563,7 +624,7 @@ private fun HomeScreen(
     val update = d.optJSONObject("app_update")
     val serverVersionCode = update?.optInt("version_code", 1) ?: 1
     val isMandatory = update?.optBoolean("mandatory", false) ?: false
-    val downloadUrl = update?.optString("download_url").orEmpty().ifBlank { "https://github.com/amandangi26/ward-sadasya/releases/latest" }
+    val downloadUrl = update?.optString("download_url").orEmpty().ifBlank { "https://github.com/aadiliftekhar143-cmd/inc-mcd-network/releases/latest/download/app-release.apk" }
     val updateNotes = update?.optString("notes").orEmpty().ifBlank { "नया वर्शन उपलब्ध है।" }
     val versionName = update?.optString("version_name").orEmpty().ifBlank { "" }
     val isUpdateAvailable = serverVersionCode > BuildConfig.VERSION_CODE
@@ -644,6 +705,22 @@ private fun HomeScreen(
                                 )
                                 Text(APP_NAME, color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.8.sp,
                                     modifier = Modifier.padding(start = 8.dp).weight(1f))
+                                Box {
+                                    GlassButton(Icons.Filled.Menu, "मेन्यू") { menuOpen = true }
+                                    val unreadInbox = d.optInt("unread_inbox")
+                                    if (unreadInbox > 0) Box(Modifier.align(Alignment.TopEnd).size(10.dp).clip(CircleShape).background(Color(0xFFE5402F)))
+                                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                        listOf(
+                                            Triple("inbox", Icons.Filled.MarkEmailUnread, "मेरा इनबॉक्स" + if (unreadInbox > 0) " ($unreadInbox नए)" else ""),
+                                            Triple("posters", Icons.Filled.Image, "पोस्टर और बैनर"),
+                                            Triple("own", Icons.Filled.AddTask, "अपना टास्क जोड़ें"),
+                                            Triple("president", Icons.Filled.RecordVoiceOver, "अध्यक्ष जी को संदेश भेजें"),
+                                        ).forEach { (k, ic, label) ->
+                                            DropdownMenuItem(leadingIcon = { Icon(ic, null, tint = Navy) }, text = { Text(label, fontSize = 15.sp) }, onClick = { menuOpen = false; onMenu(k) })
+                                        }
+                                    }
+                                }
+                                Spacer(Modifier.width(8.dp))
                                 GlassButton(Icons.Filled.Refresh, "रीफ्रेश") { reload++ }
                                 Spacer(Modifier.width(8.dp))
                                 GlassButton(Icons.AutoMirrored.Filled.Logout, "नंबर बदलें", onLogout)
@@ -777,7 +854,7 @@ private fun HomeScreen(
                             }
                             uploadTasks.forEach { t ->
                                 HorizontalDivider(color = Color(0xFFF0F2F6))
-                                TaskRow(t, perVideo = rule.optInt("video", PTS_VIDEO)) { onTask(t, shareTasks) }
+                                TaskRow(t, perVideo = rule.optInt("task", PTS_TASK)) { onTask(t, shareTasks) }
                             }
                         }
                     }
@@ -797,10 +874,10 @@ private fun HomeScreen(
     }
 }
 
-private fun Nav.copyWithHome(home: () -> Unit) = Nav(home, messages, notifications, progress, unread)
+internal fun Nav.copyWithHome(home: () -> Unit) = Nav(home, messages, notifications, progress, unread)
 
 @Composable
-private fun GlassButton(icon: ImageVector, label: String, onClick: () -> Unit) {
+internal fun GlassButton(icon: ImageVector, label: String, onClick: () -> Unit) {
     Box(
         Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).background(Color(0x660E1B3D))
             .border(1.dp, Color(0x2EFFFFFF), RoundedCornerShape(12.dp)).clickable { onClick() },
@@ -809,7 +886,7 @@ private fun GlassButton(icon: ImageVector, label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun StatCell(value: String, label: String, color: Color, modifier: Modifier) {
+internal fun StatCell(value: String, label: String, color: Color, modifier: Modifier) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text(value, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = color)
         Text(label, fontSize = 12.sp, color = Muted)
@@ -817,7 +894,7 @@ private fun StatCell(value: String, label: String, color: Color, modifier: Modif
 }
 
 @Composable
-private fun DateChip(day: String, isToday: Boolean, isSelected: Boolean, isFuture: Boolean, hasTasks: Boolean, onClick: () -> Unit) {
+internal fun DateChip(day: String, isToday: Boolean, isSelected: Boolean, isFuture: Boolean, hasTasks: Boolean, onClick: () -> Unit) {
     val c = parseYmd(day)
     val weekday = c?.let { HI_WEEKDAYS[it.get(Calendar.DAY_OF_WEEK) - 1] } ?: ""
     val num = c?.get(Calendar.DAY_OF_MONTH)?.toString() ?: day
@@ -845,10 +922,10 @@ private fun DateChip(day: String, isToday: Boolean, isSelected: Boolean, isFutur
 }
 
 @Composable
-private fun TaskRow(t: JSONObject, perVideo: Int, onClick: () -> Unit) {
+internal fun TaskRow(t: JSONObject, perVideo: Int, onClick: () -> Unit) {
     val done = t.optBoolean("done")
     val videos = t.optInt("videos")
-    val slots = t.optInt("video_slots", 1)
+    val slots = NEED_VIDEOS
     Row(
         Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 16.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -858,8 +935,8 @@ private fun TaskRow(t: JSONObject, perVideo: Int, onClick: () -> Unit) {
             Text(t.optString("title"), fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = Ink, lineHeight = 19.sp,
                 maxLines = 2, overflow = TextOverflow.Ellipsis)
             Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("+$perVideo अंक/वीडियो", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = Green, maxLines = 1)
-                Text(" · $videos/$slots वीडियो", fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("+$perVideo अंक", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = Green, maxLines = 1)
+                Text(" · $videos/$NEED_VIDEOS वीडियो · ${t.optInt("photos")}/$NEED_PHOTOS फोटो", fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         if (done) {
@@ -879,15 +956,15 @@ private fun TaskRow(t: JSONObject, perVideo: Int, onClick: () -> Unit) {
     }
 }
 
-private data class Platform(val key: String, val label: String, val color: Color)
-private val PLATFORMS = listOf(Platform("facebook", "Facebook", Color(0xFF1877F2)), Platform("x", "X", Color(0xFF111111)), Platform("instagram", "Instagram", Color(0xFFC13584)))
+internal data class Platform(val key: String, val label: String, val color: Color)
+internal val PLATFORMS = listOf(Platform("x", "X", Color(0xFF111111)), Platform("facebook", "Facebook", Color(0xFF1877F2)), Platform("instagram", "Instagram", Color(0xFFC13584)))
 
 /**
  * Post cards for Facebook, X and Instagram. Each card comes from an admin share card (title, description, links).
  * The first open per post and platform is recorded by the server and earns points.
  */
 @Composable
-private fun SocialPosts(shareTasks: List<JSONObject>, social: JSONObject?, perShare: Int, onShared: () -> Unit) {
+internal fun SocialPosts(shareTasks: List<JSONObject>, social: JSONObject?, perShare: Int, onShared: () -> Unit) {
     val ctx = LocalContext.current
     val firstWithPosts = PLATFORMS.firstOrNull { p -> shareTasks.any { it.str("link_${p.key}") != null } }?.key ?: "facebook"
     var platform by remember(shareTasks) { mutableStateOf(firstWithPosts) }
@@ -933,7 +1010,7 @@ private fun SocialPosts(shareTasks: List<JSONObject>, social: JSONObject?, perSh
 }
 
 @Composable
-private fun PostCard(t: JSONObject, p: Platform, perShare: Int, modifier: Modifier, onShared: () -> Unit) {
+internal fun PostCard(t: JSONObject, p: Platform, perShare: Int, modifier: Modifier, onShared: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val taskId = t.optLong("id")
@@ -1039,7 +1116,7 @@ private fun PostCard(t: JSONObject, p: Platform, perShare: Int, modifier: Modifi
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun BottomBar(selected: String, nav: Nav) {
+internal fun BottomBar(selected: String, nav: Nav) {
     NavigationBar(containerColor = Color.White, tonalElevation = 0.dp, modifier = Modifier.border(BorderStroke(1.dp, Line))) {
         val colors = NavigationBarItemDefaults.colors(
             selectedIconColor = Orange, selectedTextColor = Navy, indicatorColor = OrangeBg,
@@ -1062,7 +1139,7 @@ private fun BottomBar(selected: String, nav: Nav) {
 }
 
 @Composable
-private fun AppFooter(helpline: String?) {
+internal fun AppFooter(helpline: String?) {
     val ctx = LocalContext.current
     Column(
         Modifier.fillMaxWidth().padding(top = 30.dp),
@@ -1089,20 +1166,22 @@ private fun AppFooter(helpline: String?) {
     }
 }
 
-private val FbBlue = Color(0xFF1877F2)
-private val IgPink = Color(0xFFC13584)
-private val WaGreen = Color(0xFF128C7E)
+internal val FbBlue = Color(0xFF1877F2)
+internal val IgPink = Color(0xFFC13584)
+internal val WaGreen = Color(0xFF128C7E)
 
 // Points per action. The server sends the live values in points_rule; these are only fallbacks.
-private const val PTS_VIDEO = 20
-private const val PTS_PHOTO = 10
-private const val PTS_SHARE = 15
+internal const val PTS_TASK = 100      // a task done in full: 2 photos and 2 videos
+internal const val PTS_SHARE = 100     // per post and platform
+internal const val PTS_OWN_TASK = 100  // own task, once the admin approves
+internal const val NEED_VIDEOS = 2
+internal const val NEED_PHOTOS = 2
 
 /** One post on one platform that the member can still share. */
-private data class ShareItem(val taskId: Long, val caption: String, val platform: String, val url: String, val action: String)
+internal data class ShareItem(val taskId: Long, val caption: String, val platform: String, val url: String, val action: String)
 
 /** Every (post, platform) pair in these share cards that the member has not shared yet. */
-private fun pendingShares(tasks: List<JSONObject>): List<ShareItem> = tasks.flatMap { t ->
+internal fun pendingShares(tasks: List<JSONObject>): List<ShareItem> = tasks.flatMap { t ->
     val shared = t.optJSONArray("shared")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
     listOf("facebook", "x", "instagram", "whatsapp").mapNotNull { p ->
         val url = t.str("link_$p") ?: return@mapNotNull null
@@ -1118,7 +1197,7 @@ private fun pendingShares(tasks: List<JSONObject>): List<ShareItem> = tasks.flat
 
 /** Share buttons in a 2-column grid, each with the post's caption. */
 @Composable
-private fun ShareGrid(items: List<ShareItem>) {
+internal fun ShareGrid(items: List<ShareItem>) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var tapped by remember { mutableStateOf(setOf<String>()) }
@@ -1174,11 +1253,11 @@ private fun ShareGrid(items: List<ShareItem>) {
 // ---------------------------------------------------------------- Task + uploads
 
 @Composable
-private fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBack: () -> Unit, onLogout: () -> Unit) {
+internal fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBack: () -> Unit, onLogout: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val taskId = initial.getLong("id")
-    val slots = initial.optInt("video_slots", 1)
+    val slots = NEED_VIDEOS
     var videos by remember { mutableIntStateOf(initial.optInt("videos")) }
     var photos by remember { mutableIntStateOf(initial.optInt("photos")) }
     var done by remember { mutableStateOf(initial.optBoolean("done")) }
@@ -1240,7 +1319,7 @@ private fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBack
                     e.code == "unauthorized" -> { onLogout(); return false }
                     e.code == "not_open_yet" -> Toast.makeText(ctx, "यह टास्क अपनी तारीख पर खुलेगा", Toast.LENGTH_LONG).show()
                     e.code == "limit_reached" -> {
-                        Toast.makeText(ctx, if (kind == "video") "इस टास्क के सभी वीडियो जुड़ चुके हैं" else "इस टास्क में ज़्यादा से ज़्यादा 10 फोटो जुड़ सकती हैं", Toast.LENGTH_LONG).show()
+                        Toast.makeText(ctx, if (kind == "video") "इस टास्क के सभी वीडियो जुड़ चुके हैं" else "इस टास्क में $NEED_PHOTOS फोटो जुड़ चुकी हैं", Toast.LENGTH_LONG).show()
                         return false
                     }
                     e.code == "file_too_large" || detail.contains("EntityTooLarge", ignoreCase = true) || detail.contains("Payload too large", ignoreCase = true) -> {
@@ -1265,9 +1344,9 @@ private fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBack
 
     fun uploadPhotos(uris: List<Uri>) {
         if (uris.isEmpty()) return
-        val room = (10 - photos).coerceAtLeast(0)
+        val room = (NEED_PHOTOS - photos).coerceAtLeast(0)
         val list = uris.take(room)
-        if (list.isEmpty()) { Toast.makeText(ctx, "इस टास्क में ज़्यादा से ज़्यादा 10 फोटो जुड़ सकती हैं", Toast.LENGTH_LONG).show(); return }
+        if (list.isEmpty()) { Toast.makeText(ctx, "इस टास्क में $NEED_PHOTOS फोटो जुड़ चुकी हैं", Toast.LENGTH_LONG).show(); return }
         if (uris.size > room) Toast.makeText(ctx, "सिर्फ़ $room और फोटो जुड़ सकती हैं, पहली $room जोड़ी जा रही हैं", Toast.LENGTH_LONG).show()
         uploadingKind = "photo"
         scope.launch {
@@ -1298,7 +1377,7 @@ private fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBack
             if (desc.isNotBlank() && desc != "null") Text(desc, fontSize = 14.sp, color = Color(0xFF3B4250))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Chip("आज रात 11:59 तक", OrangeBg, OrangeText)
-                Chip("$slots वीडियो · +$PTS_VIDEO अंक/वीडियो", Ground, Color(0xFF3B4250))
+                Chip("2 फोटो + 2 वीडियो · +$PTS_TASK अंक", Ground, Color(0xFF3B4250))
             }
 
             Text("अटैचमेंट", fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
@@ -1321,26 +1400,27 @@ private fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBack
             }
 
             // Photos
-            if (initial.optBoolean("allow_photos", true)) {
-                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Ground).padding(12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("फोटो", fontWeight = FontWeight.Bold)
-                            Text(if (photos > 0) "$photos फोटो जुड़ी · एक साथ कई फोटो चुन सकते हैं" else "एक साथ कई फोटो चुन सकते हैं (हर फोटो +$PTS_PHOTO अंक)", fontSize = 12.sp, color = Muted)
-                        }
-                        OutlinedButton(onClick = { pickPhoto.launch("image/*") }, enabled = !busy, modifier = Modifier.height(44.dp)) {
-                            Icon(Icons.Filled.PhotoCamera, null, modifier = Modifier.size(18.dp)); Text("  फोटो जोड़ें", color = Ink)
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Ground).padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row { Text("फोटो", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); Text("$photos / $NEED_PHOTOS", fontWeight = FontWeight.Bold) }
+                for (i in 0 until NEED_PHOTOS) {
+                    when {
+                        i < photos -> SlotRow("फोटो ${i + 1}", "अपलोड पूरा", GreenText, filled = true) {}
+                        i == photos && uploadingKind == "photo" -> UploadingRow(photoBatch?.let { "फोटो $it" } ?: "फोटो ${i + 1}", progress ?: 0f)
+                        else -> SlotRow("फोटो ${i + 1}", "गैलरी से फोटो चुनें (एक साथ दोनों भी चुन सकते हैं)", Blue, filled = false, enabled = !busy && i == photos) {
+                            pickPhoto.launch("image/*")
                         }
                     }
-                    if (uploadingKind == "photo") UploadingRow(photoBatch?.let { "फोटो $it" } ?: "फोटो", progress ?: 0f)
                 }
             }
         }
 
         // Tick / Submit
         Column(Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            if (videos == 0) {
-                Text("कम से कम 1 वीडियो अपलोड होने के बाद ही जमा कर सकते हैं", fontSize = 13.sp, color = OrangeText)
+            if (videos < NEED_VIDEOS || photos < NEED_PHOTOS) {
+                Text("2 फोटो और 2 वीडियो अपलोड होने के बाद जमा कर सकते हैं (+$PTS_TASK अंक)", fontSize = 13.sp, color = OrangeText, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(8.dp))
             }
             Button(
@@ -1365,7 +1445,7 @@ private fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBack
                         submitting = false
                     }
                 },
-                enabled = videos > 0 && !busy && !submitting,
+                enabled = videos >= NEED_VIDEOS && photos >= NEED_PHOTOS && !busy && !submitting,
                 colors = ButtonDefaults.buttonColors(containerColor = if (done) Green else Blue),
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 shape = RoundedCornerShape(12.dp),
@@ -1486,13 +1566,13 @@ private fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBack
 }
 
 @Composable
-private fun Chip(text: String, bg: Color, fg: Color) {
+internal fun Chip(text: String, bg: Color, fg: Color) {
     Text(text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = fg,
         modifier = Modifier.clip(RoundedCornerShape(50)).background(bg).padding(horizontal = 10.dp, vertical = 4.dp))
 }
 
 @Composable
-private fun SlotRow(title: String, sub: String, subColor: Color, filled: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+internal fun SlotRow(title: String, sub: String, subColor: Color, filled: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color.White)
             .then(if (!filled) Modifier.border(BorderStroke(1.5.dp, if (enabled) Color(0xFF8AABDD) else Line), RoundedCornerShape(10.dp)) else Modifier)
@@ -1511,7 +1591,7 @@ private fun SlotRow(title: String, sub: String, subColor: Color, filled: Boolean
 }
 
 @Composable
-private fun UploadingRow(title: String, p: Float) {
+internal fun UploadingRow(title: String, p: Float) {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color.White).padding(10.dp)) {
         Text("$title अपलोड हो रहा है… ${(p * 100).toInt()}%", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         LinearProgressIndicator(progress = { p }, modifier = Modifier.padding(top = 6.dp).fillMaxWidth())
@@ -1522,7 +1602,7 @@ private fun UploadingRow(title: String, p: Float) {
 // ---------------------------------------------------------------- Notifications
 
 @Composable
-private fun NotificationsScreen(data: JSONObject, nav: Nav) {
+internal fun NotificationsScreen(data: JSONObject, nav: Nav, onTask: (JSONObject, List<JSONObject>) -> Unit = { _, _ -> }) {
     val ctx = LocalContext.current
     BackHandler { nav.home() }
     val update = data.optJSONObject("app_update")
@@ -1588,17 +1668,21 @@ private fun NotificationsScreen(data: JSONObject, nav: Nav) {
                         }
                     }
 
-                    if (pendingUploads.isNotEmpty()) {
+                    // Each pending task opens that task directly
+                    val shareCards = (0 until tasks.length()).map { tasks.getJSONObject(it) }.filter { it.optString("kind") == "share" }
+                    pendingUploads.forEach { t ->
                         Row(
                             Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color.White)
-                                .border(1.dp, Color(0xFFF6C9A0), RoundedCornerShape(16.dp)).clickable { nav.home() }.padding(14.dp),
+                                .border(1.dp, Color(0xFFF6C9A0), RoundedCornerShape(16.dp)).clickable { onTask(t, shareCards) }.padding(14.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            IconTile(Icons.Filled.Info, OrangeBg, Orange, 40)
+                            IconTile(Icons.Filled.Videocam, OrangeBg, Orange, 40)
                             Column(Modifier.padding(start = 12.dp).weight(1f)) {
-                                Text("आज के टास्क बाकी हैं", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = OrangeText)
-                                Text("आपके ${pendingUploads.size} टास्क बाकी हैं। आज रात 11:59 तक वीडियो अपलोड करें।", fontSize = 12.sp, color = Muted)
+                                Text("आज का नया टास्क", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = OrangeText)
+                                Text(t.optString("title"), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text("2 फोटो + 2 वीडियो · आज रात 11:59 तक", fontSize = 12.sp, color = Muted)
                             }
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Muted)
                         }
                     }
 
@@ -1638,7 +1722,7 @@ private fun NotificationsScreen(data: JSONObject, nav: Nav) {
 // ---------------------------------------------------------------- Leader messages
 
 @Composable
-private fun MessagesScreen(nav: Nav, helpline: String?, social: JSONObject?, dpccSocial: JSONObject?) {
+internal fun MessagesScreen(nav: Nav, helpline: String?, social: JSONObject?, dpccSocial: JSONObject?) {
     val ctx = LocalContext.current
     var list by remember { mutableStateOf<List<JSONObject>?>(null) }
     var current by remember { mutableStateOf<JSONObject?>(null) }
@@ -1737,7 +1821,7 @@ private fun MessagesScreen(nav: Nav, helpline: String?, social: JSONObject?, dpc
 // ---------------------------------------------------------------- Points
 
 @Composable
-private fun ProgressScreen(data: JSONObject?, onData: (JSONObject) -> Unit, nav: Nav, onProfile: () -> Unit) {
+internal fun ProgressScreen(data: JSONObject?, onData: (JSONObject) -> Unit, nav: Nav, onProfile: () -> Unit) {
     val ctx = LocalContext.current
     BackHandler { nav.home() }
     var profile by remember { mutableStateOf<JSONObject?>(null) }
@@ -1756,8 +1840,10 @@ private fun ProgressScreen(data: JSONObject?, onData: (JSONObject) -> Unit, nav:
     val stats = data?.optJSONObject("stats") ?: JSONObject()
     val rule = data?.optJSONObject("points_rule") ?: JSONObject()
     val perShare = rule.optInt("share", PTS_SHARE)
-    val perPhoto = rule.optInt("photo", PTS_PHOTO)
-    val perVideo = rule.optInt("video", PTS_VIDEO)
+    val perTask = rule.optInt("task", PTS_TASK)
+    val perOwn = rule.optInt("own_task", PTS_OWN_TASK)
+    var ranks by remember { mutableStateOf<JSONObject?>(null) }
+    LaunchedEffect(Unit) { try { ranks = Api.call(ctx, "ranks").optJSONObject("ranks") } catch (e: Exception) {} }
 
     Scaffold(containerColor = Ground, bottomBar = { BottomBar("progress", nav) }) { inner ->
         Column(Modifier.fillMaxSize().padding(inner)) {
@@ -1777,17 +1863,34 @@ private fun ProgressScreen(data: JSONObject?, onData: (JSONObject) -> Unit, nav:
                         }
                         Icon(Icons.Filled.EmojiEvents, null, tint = Gold, modifier = Modifier.size(34.dp))
                     }
+                    // Anonymous rank: no names, only the member's own position
+                    ranks?.let { rk ->
+                        Text("मेरी रैंकिंग", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Muted, modifier = Modifier.padding(start = 2.dp, top = 20.dp, bottom = 10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("ward" to "वार्ड में", "assembly" to "विधानसभा में", "district" to "ज़िले में", "delhi" to "दिल्ली में").forEach { (k, label) ->
+                                val o = rk.optJSONObject(k)
+                                Column(
+                                    Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(Color.White).border(1.dp, Line, RoundedCornerShape(14.dp)).padding(vertical = 10.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                ) {
+                                    Text(o?.let { "${it.optInt("rank")}" } ?: "–", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Navy)
+                                    Text(o?.let { "/ ${fmtNum(it.optInt("total"))}" } ?: "", fontSize = 11.sp, color = Muted)
+                                    Text(label, fontSize = 11.5.sp, color = Ink, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
+                    }
                     Text("आपके अंक ऐसे गिने जाते हैं", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Muted, modifier = Modifier.padding(start = 2.dp, top = 20.dp, bottom = 10.dp))
                     CardBox {
-                        PointsRow(Icons.Filled.Share, Color(0xFFE8F0FE), Blue, "सोशल मीडिया शेयर", stats.optInt("shares"), perShare)
+                        PointsRow(Icons.Filled.Share, Color(0xFFE8F0FE), Blue, "सोशल मीडिया शेयर (हर पोस्ट, हर प्लेटफ़ॉर्म)", stats.optInt("shares"), perShare)
                         HorizontalDivider(color = Color(0xFFF0F2F6))
-                        PointsRow(Icons.Filled.PhotoCamera, GreenBg, Green, "फोटो अपलोड", stats.optInt("photos"), perPhoto)
+                        PointsRow(Icons.Filled.Videocam, OrangeBg, Orange, "पूरे टास्क (2 फोटो + 2 वीडियो)", stats.optInt("full_tasks"), perTask)
                         HorizontalDivider(color = Color(0xFFF0F2F6))
-                        PointsRow(Icons.Filled.Videocam, OrangeBg, Orange, "वीडियो अपलोड", stats.optInt("videos"), perVideo)
+                        PointsRow(Icons.Filled.AddTask, GreenBg, Green, "अपने टास्क (मंज़ूरी के बाद)", stats.optInt("own_tasks"), perOwn)
                     }
                     Row(Modifier.padding(top = 10.dp, start = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Info, null, tint = Muted, modifier = Modifier.size(14.dp))
-                        Text("  हर शेयर पर $perShare, हर फोटो पर $perPhoto और हर वीडियो पर $perVideo अंक।", fontSize = 12.5.sp, color = Muted)
+                        Text("  सब मिलाकर एक ही कुल अंक बनते हैं।", fontSize = 12.5.sp, color = Muted)
                     }
                     // Profile
                     Text("मेरी प्रोफ़ाइल", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Muted, modifier = Modifier.padding(start = 2.dp, top = 22.dp, bottom = 10.dp))
@@ -1819,7 +1922,7 @@ private fun ProgressScreen(data: JSONObject?, onData: (JSONObject) -> Unit, nav:
 }
 
 @Composable
-private fun PointsRow(icon: ImageVector, bg: Color, fg: Color, label: String, count: Int, each: Int) {
+internal fun PointsRow(icon: ImageVector, bg: Color, fg: Color, label: String, count: Int, each: Int) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
         IconTile(icon, bg, fg)
         Column(Modifier.padding(start = 12.dp).weight(1f)) {
@@ -1837,7 +1940,7 @@ private fun PointsRow(icon: ImageVector, bg: Color, fg: Color, label: String, co
 
 /** Facebook, X and Instagram follow buttons under a heading. Links are set in admin Settings. */
 @Composable
-private fun FollowSection(heading: AnnotatedString, social: JSONObject?) {
+internal fun FollowSection(heading: AnnotatedString, social: JSONObject?) {
     val ctx = LocalContext.current
     val items = listOf(
         Triple("facebook", "Facebook", R.drawable.ic_facebook),
@@ -1874,7 +1977,7 @@ private fun FollowSection(heading: AnnotatedString, social: JSONObject?) {
 }
 
 @Composable
-private fun FollowLeaderAndDpcc(leader: JSONObject?, dpcc: JSONObject?) {
+internal fun FollowLeaderAndDpcc(leader: JSONObject?, dpcc: JSONObject?) {
     Spacer(Modifier.height(6.dp))
     FollowSection(
         buildAnnotatedString {
@@ -1896,7 +1999,7 @@ private fun FollowLeaderAndDpcc(leader: JSONObject?, dpcc: JSONObject?) {
 
 /** Round profile photo, or a person icon when there is none. */
 @Composable
-private fun ProfilePhoto(model: Any?, size: Int, onClick: (() -> Unit)? = null) {
+internal fun ProfilePhoto(model: Any?, size: Int, onClick: (() -> Unit)? = null) {
     Box(
         Modifier.size(size.dp).clip(CircleShape).background(Color(0x22FFFFFF)).border(2.dp, Color.White, CircleShape)
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
@@ -1908,7 +2011,7 @@ private fun ProfilePhoto(model: Any?, size: Int, onClick: (() -> Unit)? = null) 
 }
 
 /** Crops the picked image to a centred square, scales it to 640 px and saves it as a JPEG in the cache. */
-private fun squarePhoto(ctx: Context, uri: Uri): File? = try {
+internal fun squarePhoto(ctx: Context, uri: Uri): File? = try {
     val src = ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
     if (src == null) null else {
         // Respect the camera's rotation so faces are upright.
@@ -1934,7 +2037,7 @@ private fun squarePhoto(ctx: Context, uri: Uri): File? = try {
 
 /** Text field that opens a list to pick from. */
 @Composable
-private fun PickField(label: String, value: String, options: List<Pair<String, String>>, onPick: (String) -> Unit) {
+internal fun PickField(label: String, value: String, options: List<Pair<String, String>>, onPick: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
     val shown = options.firstOrNull { it.first == value }?.second ?: value
     Box(Modifier.fillMaxWidth()) {
@@ -1954,7 +2057,7 @@ private fun PickField(label: String, value: String, options: List<Pair<String, S
 }
 
 @Composable
-private fun ProfileScreen(onBack: () -> Unit, onLogout: () -> Unit) {
+internal fun ProfileScreen(onBack: () -> Unit, onLogout: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     BackHandler { onBack() }
@@ -1973,6 +2076,13 @@ private fun ProfileScreen(onBack: () -> Unit, onLogout: () -> Unit) {
     var photoUrl by remember { mutableStateOf<String?>(null) }
     var newPhoto by remember { mutableStateOf<File?>(null) }
     var saving by remember { mutableStateOf(false) }
+    var dob by remember { mutableStateOf("") }
+    var gender by remember { mutableStateOf("") }
+    var married by remember { mutableStateOf<Boolean?>(null) }
+    var anniversary by remember { mutableStateOf("") }
+    var linkFb by remember { mutableStateOf("") }
+    var linkIg by remember { mutableStateOf("") }
+    var linkX by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         try {
@@ -1985,6 +2095,10 @@ private fun ProfileScreen(onBack: () -> Unit, onLogout: () -> Unit) {
             ward = pick("ward_no"); assembly = pick("assembly"); lokSabha = src.str("lok_sabha") ?: ""
             district = pick("district"); family = src.str("family_members") ?: ""
             mobile = pick("contact_mobile"); altMobile = src.str("alt_mobile") ?: ""
+            dob = src.str("dob") ?: ""; gender = src.str("gender") ?: ""
+            married = if (src.has("married") && !src.isNull("married")) src.optBoolean("married") else null
+            anniversary = src.str("anniversary") ?: ""
+            linkFb = src.str("link_facebook") ?: ""; linkIg = src.str("link_instagram") ?: ""; linkX = src.str("link_x") ?: ""
             photoUrl = r.str("photo_url")
             loaded = r
         } catch (e: ApiError) {
@@ -1998,6 +2112,10 @@ private fun ProfileScreen(onBack: () -> Unit, onLogout: () -> Unit) {
 
     fun save() {
         if (name.isBlank()) { Toast.makeText(ctx, "पूरा नाम लिखें", Toast.LENGTH_SHORT).show(); return }
+        if (dob.isBlank()) { Toast.makeText(ctx, "जन्म तिथि चुनें", Toast.LENGTH_SHORT).show(); return }
+        if (gender.isBlank()) { Toast.makeText(ctx, "लिंग चुनें", Toast.LENGTH_SHORT).show(); return }
+        if (married == null) { Toast.makeText(ctx, "विवाहित / अविवाहित चुनें", Toast.LENGTH_SHORT).show(); return }
+        if (married == true && anniversary.isBlank()) { Toast.makeText(ctx, "शादी की सालगिरह की तारीख चुनें", Toast.LENGTH_SHORT).show(); return }
         if (mobile.isNotBlank() && mobile.length != 10) { Toast.makeText(ctx, "मोबाइल नंबर 10 अंकों का हो", Toast.LENGTH_SHORT).show(); return }
         if (altMobile.isNotBlank() && altMobile.length != 10) { Toast.makeText(ctx, "वैकल्पिक मोबाइल नंबर 10 अंकों का हो", Toast.LENGTH_SHORT).show(); return }
         saving = true
@@ -2013,6 +2131,8 @@ private fun ProfileScreen(onBack: () -> Unit, onLogout: () -> Unit) {
                     .put("full_name", name.trim()).put("details", details.trim())
                     .put("ward_no", ward).put("assembly", assembly).put("lok_sabha", lokSabha).put("district", district)
                     .put("family_members", family).put("contact_mobile", mobile).put("alt_mobile", altMobile)
+                    .put("dob", dob).put("gender", gender).put("married", married == true).put("anniversary", if (married == true) anniversary else JSONObject.NULL)
+                    .put("link_facebook", linkFb.trim()).put("link_instagram", linkIg.trim()).put("link_x", linkX.trim())
                 photoPath?.let { p.put("photo_path", it) }
                 Api.call(ctx, "profile_save", p)
                 Toast.makeText(ctx, "जानकारी भेज दी गई। एडमिन की मंज़ूरी के बाद जुड़ जाएगी।", Toast.LENGTH_LONG).show()
@@ -2021,6 +2141,7 @@ private fun ProfileScreen(onBack: () -> Unit, onLogout: () -> Unit) {
                 when (e.code) {
                     "unauthorized" -> onLogout()
                     "bad_mobile", "bad_alt_mobile" -> Toast.makeText(ctx, "मोबाइल नंबर सही नहीं है", Toast.LENGTH_LONG).show()
+                    "dob_required", "gender_required", "married_required", "anniversary_required" -> Toast.makeText(ctx, "जन्म तिथि, लिंग और विवाह की जानकारी ज़रूरी है", Toast.LENGTH_LONG).show()
                     else -> Toast.makeText(ctx, "सेव नहीं हुआ (${e.code})", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
@@ -2081,6 +2202,14 @@ private fun ProfileScreen(onBack: () -> Unit, onLogout: () -> Unit) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
             OutlinedTextField(altMobile, { v -> altMobile = v.filter { it.isDigit() }.take(10) }, label = { Text("वैकल्पिक मोबाइल नंबर") }, singleLine = true, prefix = { Text("+91 ") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+            DateField("जन्म तिथि *", dob) { dob = it }
+            ChoiceRow("लिंग *", listOf("male" to "पुरुष", "female" to "महिला", "other" to "अन्य"), gender) { gender = it }
+            ChoiceRow("वैवाहिक स्थिति *", listOf("yes" to "विवाहित", "no" to "अविवाहित"), when (married) { true -> "yes"; false -> "no"; else -> "" }) { married = it == "yes" }
+            if (married == true) DateField("शादी की सालगिरह *", anniversary) { anniversary = it }
+            Text("सोशल मीडिया (ज़रूरी नहीं)", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.padding(top = 6.dp))
+            OutlinedTextField(linkFb, { linkFb = it.take(300) }, label = { Text("Facebook प्रोफ़ाइल लिंक") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+            OutlinedTextField(linkIg, { linkIg = it.take(300) }, label = { Text("Instagram प्रोफ़ाइल लिंक") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+            OutlinedTextField(linkX, { linkX = it.take(300) }, label = { Text("X (Twitter) प्रोफ़ाइल लिंक") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
             Text("लॉगिन नंबर नहीं बदलेगा। यह जानकारी एडमिन की मंज़ूरी के बाद आपकी प्रोफ़ाइल में जुड़ेगी।", fontSize = 12.sp, color = Muted, lineHeight = 17.sp)
         }
         Button(
@@ -2090,6 +2219,46 @@ private fun ProfileScreen(onBack: () -> Unit, onLogout: () -> Unit) {
         ) {
             if (saving) { CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp); Text("  भेजा जा रहा है…", fontWeight = FontWeight.Bold) }
             else Text("सेव करें और मंज़ूरी के लिए भेजें", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+/** Date picked with the phone's calendar, stored as YYYY-MM-DD. */
+@Composable
+internal fun DateField(label: String, value: String, onPick: (String) -> Unit) {
+    val ctx = LocalContext.current
+    Box(Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = if (value.isBlank()) "" else hiDate(value), onValueChange = {}, readOnly = true, label = { Text(label) },
+            trailingIcon = { Icon(Icons.Filled.CalendarMonth, null) }, singleLine = true,
+            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+        )
+        Box(Modifier.matchParentSize().padding(top = 8.dp).clip(RoundedCornerShape(12.dp)).clickable {
+            val c = parseYmd(value) ?: Calendar.getInstance().apply { add(Calendar.YEAR, -30) }
+            android.app.DatePickerDialog(ctx, { _, y, m, d ->
+                onPick(String.format(Locale.US, "%04d-%02d-%02d", y, m + 1, d))
+            }, c.get(Calendar.YEAR), c.get(Calendar.MONTH), c.get(Calendar.DAY_OF_MONTH)).apply {
+                datePicker.maxDate = System.currentTimeMillis()
+            }.show()
+        })
+    }
+}
+
+/** A row of choices, one can be picked. */
+@Composable
+internal fun ChoiceRow(label: String, options: List<Pair<String, String>>, value: String, onPick: (String) -> Unit) {
+    Column {
+        Text(label, fontSize = 13.sp, color = Muted, modifier = Modifier.padding(start = 2.dp, bottom = 6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            options.forEach { (k, text) ->
+                val on = k == value
+                Text(
+                    text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
+                    color = if (on) Color.White else Ink,
+                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(if (on) Navy else Color.White)
+                        .border(1.dp, if (on) Navy else Line, RoundedCornerShape(10.dp)).clickable { onPick(k) }.padding(vertical = 11.dp),
+                )
+            }
         }
     }
 }

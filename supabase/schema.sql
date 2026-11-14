@@ -214,6 +214,177 @@ create table if not exists member_profiles (
   approved_at    timestamptz not null default now()
 );
 
+
+-- ================================================================ Leadership levels
+-- One app, five levels. The login number decides the level: leaders first, then ward members.
+create table if not exists leaders (
+  mobile        text primary key check (mobile ~ '^[6-9][0-9]{9}$'),
+  name          text not null,
+  role          text not null check (role in ('president','gs','dp','observer')),
+  district      text,          -- District Presidents: their district. Observers: district of their assembly.
+  assembly      text,          -- Observers: their Vidhan Sabha. Must match members.assembly.
+  active        boolean not null default true,
+  first_login_at timestamptz,
+  last_active_at timestamptz,
+  created_at    timestamptz not null default now()
+);
+create table if not exists leader_sessions (
+  token      uuid primary key default gen_random_uuid(),
+  mobile     text not null references leaders(mobile) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
+-- Tasks for leaders. Everything active shows in the app as coming from the DPCC President.
+-- status: active | pending (GS-created, waiting for the President) | suggested (idea sent to admin) | rejected
+create table if not exists leader_tasks (
+  id            bigserial primary key,
+  level         text not null check (level in ('gs','dp','observer')),
+  target_district text,        -- null = every leader at this level
+  target_assembly text,
+  target_mobile text,
+  title         text not null,
+  description   text,
+  audio_path    text,          -- voice note in the 'uploads' bucket
+  due_date      date,
+  status        text not null default 'active' check (status in ('active','pending','suggested','rejected')),
+  created_by    text not null default 'admin',   -- admin | president | gs | dp | observer
+  created_by_mobile text,
+  approved_at   timestamptz,
+  created_at    timestamptz not null default now()
+);
+create index if not exists leader_tasks_level_idx on leader_tasks (status, level);
+create table if not exists leader_task_done (
+  task_id   bigint not null references leader_tasks(id) on delete cascade,
+  mobile    text not null references leaders(mobile) on delete cascade,
+  done_at   timestamptz not null default now(),
+  primary key (task_id, mobile)
+);
+
+-- Observer visit reports: text, voice note, photos and videos, location from the phone.
+create table if not exists field_reports (
+  id         bigserial primary key,
+  mobile     text not null references leaders(mobile) on delete cascade,
+  task_id    bigint references leader_tasks(id) on delete set null,
+  note       text,
+  audio_path text,
+  media      jsonb not null default '[]',   -- [{kind:'photo'|'video', path}]
+  lat        double precision,
+  lng        double precision,
+  created_at timestamptz not null default now()
+);
+create index if not exists field_reports_time_idx on field_reports (created_at desc);
+
+-- Messages and voice notes leaders send down the chain. DP and Observer messages wait for admin approval
+-- (the sender is not told); President and GS messages go out at once. On approval they land in inboxes.
+create table if not exists leader_broadcasts (
+  id          bigserial primary key,
+  from_mobile text not null references leaders(mobile) on delete cascade,
+  from_role   text not null,
+  audience    text not null,            -- all | gs | dp | observer | member
+  district    text,
+  assembly    text,
+  text        text,
+  audio_path  text,
+  status      text not null default 'pending' check (status in ('pending','approved','rejected')),
+  reviewed_at timestamptz,
+  created_at  timestamptz not null default now()
+);
+
+-- Personal inbox, one way. Any mobile (leader or member). "This message is only for you."
+create table if not exists inbox (
+  id          bigserial primary key,
+  to_mobile   text not null,
+  from_name   text not null default 'माननीय DPCC अध्यक्ष देवेन्द्र यादव जी',
+  from_role   text not null default 'president',
+  kind        text not null default 'personal',   -- personal | kudos | motivate | broadcast
+  text        text,
+  audio_path  text,
+  broadcast_id bigint references leader_broadcasts(id) on delete cascade,
+  read_at     timestamptz,
+  created_at  timestamptz not null default now()
+);
+create index if not exists inbox_to_idx on inbox (to_mobile, created_at desc);
+
+-- Calls leaders make from the app (the dialer opens; the result is one tap).
+create table if not exists leader_calls (
+  id         bigserial primary key,
+  by_mobile  text not null references leaders(mobile) on delete cascade,
+  to_mobile  text not null,
+  to_name    text,
+  to_role    text,
+  outcome    text not null,
+  created_at timestamptz not null default now()
+);
+
+-- Observer star ratings of ward members (3 points each, 1 to 5).
+create table if not exists member_ratings (
+  observer_mobile text not null references leaders(mobile) on delete cascade,
+  member_mobile   text not null references members(mobile) on delete cascade,
+  ground   int check (ground between 1 and 5),
+  connect  int check (connect between 1 and 5),
+  booth    int check (booth between 1 and 5),
+  updated_at timestamptz not null default now(),
+  primary key (observer_mobile, member_mobile)
+);
+
+-- ================================================================ Members: own tasks, messages to the President, posters
+
+-- Tasks a member creates for work they did on their own (2 photos and 2 videos). 100 points once approved.
+create table if not exists member_tasks (
+  id          bigserial primary key,
+  mobile      text not null references members(mobile) on delete cascade,
+  title       text not null,
+  description text,
+  media       jsonb not null default '[]',   -- [{kind, path}]
+  status      text not null default 'pending' check (status in ('pending','approved','rejected')),
+  reviewed_at timestamptz,
+  reviewed_by text,
+  created_at  timestamptz not null default now()
+);
+create index if not exists member_tasks_status_idx on member_tasks (status, created_at desc);
+
+-- Concerns and personal messages to the DPCC President, from members and observers. Text and/or voice note.
+create table if not exists president_messages (
+  id          bigserial primary key,
+  mobile      text not null,
+  sender_role text not null default 'member',
+  sender_name text,
+  ward_no     int,
+  assembly    text,
+  district    text,
+  text        text,
+  audio_path  text,
+  read_at     timestamptz,
+  created_at  timestamptz not null default now()
+);
+create index if not exists president_messages_time_idx on president_messages (created_at desc);
+
+-- Posters and banners members download and send to their local printer.
+create table if not exists posters (
+  id         bigserial primary key,
+  title      text not null,
+  path       text not null,                 -- in the public 'posters' bucket
+  mime       text,
+  size_bytes bigint,
+  created_at timestamptz not null default now()
+);
+
+-- Profile: date of birth, gender, marriage, social links.
+alter table profile_requests add column if not exists dob date;
+alter table profile_requests add column if not exists gender text;
+alter table profile_requests add column if not exists married boolean;
+alter table profile_requests add column if not exists anniversary date;
+alter table profile_requests add column if not exists link_facebook text;
+alter table profile_requests add column if not exists link_instagram text;
+alter table profile_requests add column if not exists link_x text;
+alter table member_profiles add column if not exists dob date;
+alter table member_profiles add column if not exists gender text;
+alter table member_profiles add column if not exists married boolean;
+alter table member_profiles add column if not exists anniversary date;
+alter table member_profiles add column if not exists link_facebook text;
+alter table member_profiles add column if not exists link_instagram text;
+alter table member_profiles add column if not exists link_x text;
+
 -- SECURITY: an earlier version promoted every new Supabase Auth user to admin.
 -- With public sign-ups on, anyone could make themselves an admin. Removed.
 -- Admins and telecallers are now created from the admin panel (Team tab).
@@ -256,7 +427,7 @@ $$;
 do $$
 declare t text;
 begin
-  foreach t in array array['members','sessions','tasks','media','completions','leader_messages','message_views','announcements','settings','admins','telecallers','call_logs','push_tokens','share_events','profile_requests','member_profiles']
+  foreach t in array array['members','sessions','tasks','media','completions','leader_messages','message_views','announcements','settings','admins','telecallers','call_logs','push_tokens','share_events','profile_requests','member_profiles','leaders','leader_sessions','leader_tasks','leader_task_done','field_reports','leader_broadcasts','inbox','leader_calls','member_ratings','member_tasks','president_messages','posters']
   loop
     execute format('alter table %I enable row level security', t);
     execute format('drop policy if exists admin_all on %I', t);
@@ -290,7 +461,8 @@ create policy tc_calls_write on call_logs for insert to authenticated
   with check (is_telecaller() and caller_id = auth.uid() and in_my_districts(member_mobile));
 
 -- Per-member totals for rankings, points and the members list.
--- Points: 15 per share (per task and platform) + 10 per photo + 20 per video. Completing a task earns nothing by itself.
+-- Points: 100 per share (per task and platform), 100 per task done in full (2 photos and 2 videos),
+-- 100 per self-created task the admin approves. One combined total.
 drop view if exists member_stats;
 create view member_stats with (security_invoker = true) as
 select m.mobile, m.name, m.ward_no, m.ward_name, m.zone, coalesce(m.district, m.zone) as district, m.assembly, m.active,
@@ -299,11 +471,14 @@ select m.mobile, m.name, m.ward_no, m.ward_name, m.zone, coalesce(m.district, m.
        coalesce(med.videos, 0)   as videos,
        coalesce(med.photos, 0)   as photos,
        coalesce(sh.shares, 0)    as shares,
-       (coalesce(sh.shares, 0) * 15 + coalesce(med.photos, 0) * 10 + coalesce(med.videos, 0) * 20) as points,
+       (coalesce(sh.shares, 0) * 100 + coalesce(c.full_tasks, 0) * 100 + coalesce(st.approved, 0) * 100) as points,
+       coalesce(c.full_tasks, 0) as full_tasks,
+       coalesce(st.approved, 0) as own_tasks,
        c.last_completed_at
 from members m
 left join (
-  select mobile, count(*) as tasks_done, max(completed_at) as last_completed_at
+  select mobile, count(*) as tasks_done, max(completed_at) as last_completed_at,
+         count(*) filter (where video_count >= 2 and photo_count >= 2) as full_tasks
   from completions group by mobile
 ) c on c.mobile = m.mobile
 left join (
@@ -314,7 +489,10 @@ left join (
 ) med on med.mobile = m.mobile
 left join (
   select mobile, count(*) as shares from share_events group by mobile
-) sh on sh.mobile = m.mobile;
+) sh on sh.mobile = m.mobile
+left join (
+  select mobile, count(*) as approved from member_tasks where status = 'approved' group by mobile
+) st on st.mobile = m.mobile;
 
 -- Latest call per member, for the calling list.
 create or replace view member_last_call with (security_invoker = true) as
@@ -340,7 +518,8 @@ from tasks t;
 -- Storage buckets: private uploads from members, public leader messages.
 insert into storage.buckets (id, name, public, file_size_limit)
 values ('uploads', 'uploads', false, 524288000),
-       ('leader', 'leader', true, 524288000)
+       ('leader', 'leader', true, 524288000),
+       ('posters', 'posters', true, 52428800)
 on conflict (id) do nothing;
 
 drop policy if exists admin_read_uploads on storage.objects;
@@ -350,6 +529,9 @@ create policy admin_read_uploads on storage.objects for select to authenticated
 drop policy if exists admin_write_leader on storage.objects;
 create policy admin_write_leader on storage.objects for all to authenticated
   using (bucket_id = 'leader' and is_admin()) with check (bucket_id = 'leader' and is_admin());
+drop policy if exists admin_write_posters on storage.objects;
+create policy admin_write_posters on storage.objects for all to authenticated
+  using (bucket_id = 'posters' and is_admin()) with check (bucket_id = 'posters' and is_admin());
 
 -- Dashboard summary views (admin only through RLS on the base tables).
 create or replace view day_stats with (security_invoker = true) as
