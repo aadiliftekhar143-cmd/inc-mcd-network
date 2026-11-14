@@ -117,6 +117,7 @@ async function memberRanks(mobile: string) {
 
 async function memberStats(mobile: string) {
   const { data } = await db.from("member_stats").select("points, tasks_done, videos, photos, shares, full_tasks, own_tasks").eq("mobile", mobile).maybeSingle();
+  const { data: own } = await db.from("member_tasks").select("status").eq("mobile", mobile);
   return {
     points: Number(data?.points ?? 0),
     tasks_done: Number(data?.tasks_done ?? 0),
@@ -125,6 +126,8 @@ async function memberStats(mobile: string) {
     shares: Number(data?.shares ?? 0),
     full_tasks: Number(data?.full_tasks ?? 0),
     own_tasks: Number(data?.own_tasks ?? 0),
+    own_total: (own ?? []).length,
+    own_pending: (own ?? []).filter((x) => x.status === "pending").length,
   };
 }
 

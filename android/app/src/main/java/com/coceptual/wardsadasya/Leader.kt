@@ -79,7 +79,8 @@ internal fun LeaderApp(role: String, onLogout: () -> Unit) {
     var loading by remember { mutableStateOf(false) }
     var tab by remember { mutableIntStateOf(0) }
     val stack = remember { mutableStateListOf<Page>() }
-    var menuOpen by remember { mutableStateOf(false) }
+    val drawer = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
     var personal by remember { mutableStateOf<Pair<Callee, String>?>(null) }
     var lastBack by remember { mutableLongStateOf(0L) }
 
@@ -97,6 +98,7 @@ internal fun LeaderApp(role: String, onLogout: () -> Unit) {
 
     BackHandler {
         when {
+            drawer.isOpen -> scope.launch { drawer.close() }
             stack.isNotEmpty() -> stack.removeAt(stack.lastIndex)
             tab != 0 -> tab = 0
             System.currentTimeMillis() - lastBack < 2000 -> (ctx as? Activity)?.finish()
@@ -171,20 +173,25 @@ internal fun LeaderApp(role: String, onLogout: () -> Unit) {
         add(Triple(Icons.AutoMirrored.Filled.Logout, "लॉगआउट") { onLogout() })
     }
 
+    ModalNavigationDrawer(
+        drawerState = drawer,
+        drawerContent = {
+            SideMenu(
+                name = leader.optString("name"), sub = ROLE_HI[role] ?: role,
+                items = menu.map { (ic, label, act) ->
+                    MenuItem(ic, label, badge = if (label == "मेरा इनबॉक्स") m.optInt("unread_inbox") else 0, danger = label == "लॉगआउट", onClick = act)
+                },
+                close = { scope.launch { drawer.close() } },
+            )
+        },
+    ) {
     Scaffold(
         containerColor = Ground,
         topBar = {
             Row(Modifier.fillMaxWidth().background(Navy).padding(start = 4.dp, end = 8.dp, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box {
-                    IconButton(onClick = { menuOpen = true }) {
-                        BadgedBox(badge = { if (m.optInt("unread_inbox") > 0) Badge(containerColor = Color(0xFFE5402F)) }) {
-                            Icon(Icons.Filled.Menu, "मेन्यू", tint = Color.White)
-                        }
-                    }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        menu.forEach { (ic, label, act) ->
-                            DropdownMenuItem(leadingIcon = { Icon(ic, null, tint = Navy) }, text = { Text(label, fontSize = 15.sp) }, onClick = { menuOpen = false; act() })
-                        }
+                IconButton(onClick = { scope.launch { drawer.open() } }) {
+                    BadgedBox(badge = { if (m.optInt("unread_inbox") > 0) Badge(containerColor = Color(0xFFE5402F)) }) {
+                        Icon(Icons.Filled.Menu, "मेन्यू", tint = Color.White)
                     }
                 }
                 Spacer(Modifier.width(4.dp))
@@ -232,6 +239,7 @@ internal fun LeaderApp(role: String, onLogout: () -> Unit) {
             Spacer(Modifier.height(10.dp))
         }
     }
+    }
 }
 
 // ================================================================ Building blocks
@@ -243,7 +251,7 @@ private fun LCard(title: String? = null, action: (@Composable () -> Unit)? = nul
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (title != null || action != null) Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(title ?: "", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Ink, modifier = Modifier.weight(1f))
+            Text(title ?: "", fontSize = 15.5.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.weight(1f))
             action?.invoke()
         }
         content()
@@ -295,8 +303,8 @@ private fun RowItem(
     ) {
         rank?.let { Text("$it", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Muted, modifier = Modifier.width(26.dp), textAlign = TextAlign.Center) }
         Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(sub, fontSize = 12.sp, color = Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(title, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(sub, fontSize = 12.5.sp, color = Muted, lineHeight = 17.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         trailing()
     }
@@ -345,10 +353,8 @@ private fun Picker(label: String, value: String, options: List<Pair<String, Stri
             }
             Icon(Icons.Filled.ArrowDropDown, null, tint = Muted)
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }, modifier = Modifier.heightIn(max = 380.dp)) {
-            options.forEach { (k, t) -> DropdownMenuItem(text = { Text(t) }, onClick = { open = false; onPick(k) }) }
-        }
     }
+    if (open) PickerDialog(label, value, options, onDismiss = { open = false }) { open = false; onPick(it) }
 }
 
 private fun JSONObject.dpCallee(): Callee? = optJSONObject("dp")?.let { Callee(it.optString("mobile"), it.optString("name"), "ज़िला अध्यक्ष, ${optString("name")}") }
@@ -1033,9 +1039,10 @@ private fun ComposePage(lc: LeaderCtx, onBack: () -> Unit) {
     Picker("किसको", audience, audiences) { audience = it }
     OutlinedTextField(text, { text = it.take(2000) }, label = { Text("मैसेज लिखें") }, minLines = 5, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
     VoiceNote(voice) { voice = it }
+    val guard = rememberSendGuard()
     Button(
-        onClick = {
-            if (text.isBlank() && voice == null) { Toast.makeText(ctx, "मैसेज लिखें या वॉइस नोट रिकॉर्ड करें", Toast.LENGTH_SHORT).show(); return@Button }
+        onClick = { guard {
+            if (text.isBlank() && voice == null) { Toast.makeText(ctx, "मैसेज लिखें या वॉइस नोट रिकॉर्ड करें", Toast.LENGTH_SHORT).show(); return@guard }
             sending = true
             scope.launch {
                 try {
@@ -1047,7 +1054,7 @@ private fun ComposePage(lc: LeaderCtx, onBack: () -> Unit) {
                 } catch (e: Exception) { Toast.makeText(ctx, "भेजा नहीं जा सका", Toast.LENGTH_LONG).show() }
                 sending = false
             }
-        },
+        } },
         enabled = !sending, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Navy),
     ) { Icon(Icons.AutoMirrored.Filled.Send, null); Text(if (sending) "  भेजा जा रहा है…" else "  भेजें", fontWeight = FontWeight.Bold) }
 }
@@ -1081,11 +1088,12 @@ private fun TaskCreatePage(lc: LeaderCtx, suggest: Boolean, onBack: () -> Unit) 
         Picker("ज़िला", district, listOf("" to "सभी ज़िले") + names.map { it to it }) { district = it }
     }
     OutlinedTextField(title, { title = it.take(300) }, label = { Text("टास्क *") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
-    OutlinedTextField(details, { details = it.take(2000) }, label = { Text("विवरण") }, minLines = 3, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+    OutlinedTextField(details, { details = it.take(2000) }, label = { Text("थोड़ा और बताएं") }, minLines = 3, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
     VoiceNote(voice) { voice = it }
+    val guard = rememberSendGuard()
     Button(
-        onClick = {
-            if (title.isBlank()) { Toast.makeText(ctx, "टास्क लिखें", Toast.LENGTH_SHORT).show(); return@Button }
+        onClick = { guard {
+            if (title.isBlank()) { Toast.makeText(ctx, "टास्क लिखें", Toast.LENGTH_SHORT).show(); return@guard }
             sending = true
             scope.launch {
                 try {
@@ -1099,7 +1107,7 @@ private fun TaskCreatePage(lc: LeaderCtx, suggest: Boolean, onBack: () -> Unit) 
                 } catch (e: Exception) { Toast.makeText(ctx, "भेजा नहीं जा सका", Toast.LENGTH_LONG).show() }
                 sending = false
             }
-        },
+        } },
         enabled = !sending, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Navy),
     ) { Text(if (sending) "भेजा जा रहा है…" else if (suggest) "सुझाव भेजें" else "टास्क भेजें", fontWeight = FontWeight.Bold) }
 }
@@ -1122,6 +1130,7 @@ private fun ReportNewPage(taskId: Long?, onBack: () -> Unit) {
     if (taskId != null) Text("यह रिपोर्ट टास्क के साथ जुड़ेगी और टास्क पूरा माना जाएगा।", fontSize = 13.sp, color = Muted)
     OutlinedTextField(note, { note = it.take(3000) }, label = { Text("कहाँ गए, क्या देखा, किससे मिले") }, minLines = 5, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
     VoiceNote(voice) { voice = it }
+    val guard = rememberSendGuard()
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedButton(onClick = { pickPhotos.launch("image/*") }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)) { Icon(Icons.Filled.PhotoCamera, null); Text(" फोटो") }
         OutlinedButton(onClick = { pickVideos.launch("video/*") }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)) { Icon(Icons.Filled.Videocam, null); Text(" वीडियो") }
@@ -1133,8 +1142,8 @@ private fun ReportNewPage(taskId: Long?, onBack: () -> Unit) {
     }
     if (status.isNotBlank()) Text(status, fontSize = 13.sp, color = Blue)
     Button(
-        onClick = {
-            if (note.isBlank() && voice == null && media.isEmpty()) { Toast.makeText(ctx, "कुछ लिखें, बोलें या फोटो डालें", Toast.LENGTH_SHORT).show(); return@Button }
+        onClick = { guard {
+            if (note.isBlank() && voice == null && media.isEmpty()) { Toast.makeText(ctx, "कुछ लिखें, बोलें या फोटो डालें", Toast.LENGTH_SHORT).show(); return@guard }
             sending = true
             scope.launch {
                 try {
@@ -1153,7 +1162,7 @@ private fun ReportNewPage(taskId: Long?, onBack: () -> Unit) {
                 } catch (e: Exception) { Toast.makeText(ctx, "भेजा नहीं जा सका, इंटरनेट चेक करें", Toast.LENGTH_LONG).show() }
                 sending = false; status = ""
             }
-        },
+        } },
         enabled = !sending, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Navy),
     ) { Text(if (sending) "भेजा जा रहा है…" else "रिपोर्ट भेजें", fontWeight = FontWeight.Bold) }
 }

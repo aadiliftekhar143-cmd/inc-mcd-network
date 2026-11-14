@@ -1,0 +1,55 @@
+# Clears test data from the live database. Manual only: Actions > Reset data > Run workflow.
+# Nothing runs unless you type DELETE in the box. Needs the repo secret SUPABASE_ACCESS_TOKEN.
+#
+# scope "activity":   logins, uploads, shares, points, own tasks, profiles, inbox, reports, calls, messages.
+#                     The member and leader lists stay, so people can log in again with a clean slate.
+# scope "everything": all of the above AND the member list and the leader list.
+#
+# Kept in both cases: tasks, leader video messages, announcements, posters, settings, admin and telecaller logins.
+# Uploaded files stay in Supabase Storage (delete the "uploads" bucket contents there if you want them gone).
+name: Reset data
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: What to clear
+        type: choice
+        options: [activity, everything]
+        default: activity
+      confirm:
+        description: Type DELETE to confirm
+        required: true
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      WS_API_URL: ${{ secrets.WS_API_URL }}
+      SCOPE: ${{ inputs.scope }}
+      CONFIRM: ${{ inputs.confirm }}
+    steps:
+      - name: Check
+        run: |
+          if [ "$CONFIRM" != "DELETE" ]; then echo "::error::Not confirmed. Type DELETE to run this."; exit 1; fi
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then echo "::error::Add the repo secret SUPABASE_ACCESS_TOKEN first."; exit 1; fi
+          REF=$(echo "$WS_API_URL" | sed -E 's#^https://([a-z0-9]+)\.supabase\.co.*#\1#')
+          if [ -z "$REF" ] || [ "$REF" = "$WS_API_URL" ]; then echo "::error::Could not read the project from WS_API_URL."; exit 1; fi
+          echo "REF=$REF" >> "$GITHUB_ENV"
+
+      - name: Clear data
+        run: |
+          SQL="truncate table sessions, media, completions, message_views, call_logs, push_tokens, share_events,
+                 profile_requests, member_profiles, leader_sessions, leader_task_done, field_reports, leader_broadcasts,
+                 inbox, leader_calls, member_ratings, member_tasks, president_messages restart identity cascade;
+               update members set first_login_at = null, last_active_at = null;
+               update leaders set first_login_at = null, last_active_at = null;"
+          if [ "$SCOPE" = "everything" ]; then
+            SQL="$SQL truncate table members, leaders restart identity cascade;"
+          fi
+          SQL="$SQL select (select count(*) from members) as members, (select count(*) from leaders) as leaders, (select count(*) from media) as uploads;"
+          jq -n --arg q "$SQL" '{query: $q}' > /tmp/q.json
+          code=$(curl -s -o /tmp/out.json -w '%{http_code}' -X POST "https://api.supabase.com/v1/projects/$REF/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" --data @/tmp/q.json)
+          cat /tmp/out.json; echo; echo "HTTP $code"
+          [ "$code" -ge 200 ] && [ "$code" -lt 300 ]
