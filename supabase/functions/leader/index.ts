@@ -441,16 +441,21 @@ Deno.serve(async (req) => {
     // ---- Messages people sent to the President (President sees them; Observers can send) ----
     if (action === "to_president") {
       const text = clean(body.text), audio = ownPath(body.audio_path);
-      if (!text && !audio) return json({ error: "empty" }, 400);
+      const media = (Array.isArray(body.media) ? body.media : []).filter((m: any) => ownPath(m?.path)).slice(0, 6)
+        .map((m: any) => ({ kind: m.kind === "video" ? "video" : "photo", path: m.path }));
+      if (!text && !audio && !media.length) return json({ error: "empty" }, 400);
       await db.from("president_messages").insert({
-        mobile: me.mobile, sender_role: me.role, sender_name: me.name, assembly: me.assembly, district: me.district, text, audio_path: audio,
+        mobile: me.mobile, sender_role: me.role, sender_name: me.name, assembly: me.assembly, district: me.district, text, audio_path: audio, media,
       });
       return json({ ok: true });
     }
     if (action === "president_inbox") {
       if (me.role !== "president") return json({ error: "not_allowed" }, 403);
       const rows = await all("president_messages", "*", (q) => q.order("created_at", { ascending: false }).limit(100));
-      return json({ messages: await Promise.all(rows.map(async (r) => ({ ...r, audio_url: await signed(r.audio_path) }))) });
+      return json({ messages: await Promise.all(rows.map(async (r) => ({
+        ...r, audio_url: await signed(r.audio_path),
+        media: await Promise.all((r.media ?? []).map(async (m: any) => ({ ...m, url: await signed(m.path) }))),
+      }))) });
     }
 
     // ---- Calls (dialer opens on the phone; the result is saved here) ----

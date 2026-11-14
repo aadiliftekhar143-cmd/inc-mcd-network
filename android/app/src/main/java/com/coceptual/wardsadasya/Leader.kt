@@ -174,7 +174,20 @@ internal fun LeaderApp(role: String, onLogout: () -> Unit) {
     Scaffold(
         containerColor = Ground,
         topBar = {
-            Row(Modifier.fillMaxWidth().background(Navy).padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().background(Navy).padding(start = 4.dp, end = 8.dp, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box {
+                    IconButton(onClick = { menuOpen = true }) {
+                        BadgedBox(badge = { if (m.optInt("unread_inbox") > 0) Badge(containerColor = Color(0xFFE5402F)) }) {
+                            Icon(Icons.Filled.Menu, "मेन्यू", tint = Color.White)
+                        }
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        menu.forEach { (ic, label, act) ->
+                            DropdownMenuItem(leadingIcon = { Icon(ic, null, tint = Navy) }, text = { Text(label, fontSize = 15.sp) }, onClick = { menuOpen = false; act() })
+                        }
+                    }
+                }
+                Spacer(Modifier.width(4.dp))
                 androidx.compose.foundation.Image(
                     androidx.compose.ui.res.painterResource(R.drawable.logo), contentDescription = null,
                     modifier = Modifier.size(32.dp).clip(CircleShape).background(Color.White),
@@ -193,18 +206,6 @@ internal fun LeaderApp(role: String, onLogout: () -> Unit) {
                 IconButton(onClick = { reloadKey++ }) {
                     if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
                     else Icon(Icons.Filled.Refresh, "रीफ्रेश", tint = Color.White)
-                }
-                Box {
-                    IconButton(onClick = { menuOpen = true }) {
-                        BadgedBox(badge = { if (m.optInt("unread_inbox") > 0) Badge(containerColor = Color(0xFFE5402F)) }) {
-                            Icon(Icons.Filled.Menu, "मेन्यू", tint = Color.White)
-                        }
-                    }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        menu.forEach { (ic, label, act) ->
-                            DropdownMenuItem(leadingIcon = { Icon(ic, null, tint = Navy) }, text = { Text(label, fontSize = 15.sp) }, onClick = { menuOpen = false; act() })
-                        }
-                    }
                 }
             }
         },
@@ -1172,6 +1173,16 @@ private fun PresidentInboxPage() {
             Text("${if (m.optString("sender_role") == "member") "वार्ड ${m.optInt("ward_no")}" else LEVEL_HI[m.optString("sender_role")] ?: ""}${m.str("assembly")?.let { " · $it" } ?: ""} · ${hiDate(m.str("created_at"))}", fontSize = 12.sp, color = Muted)
             m.str("text")?.let { Text(it, fontSize = 14.sp) }
             m.str("audio_url")?.let { AudioPlayer(it) }
+            val media = m.optJSONArray("media").list()
+            if (media.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                media.forEach { x ->
+                    val url = x.str("url") ?: return@forEach
+                    Box(Modifier.size(90.dp).clip(RoundedCornerShape(10.dp)).background(Navy).clickable { openLink(ctx, url) }, contentAlignment = Alignment.Center) {
+                        if (x.optString("kind") == "photo") AsyncImage(model = url, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                        else Icon(Icons.Filled.PlayCircle, "वीडियो", tint = Color.White, modifier = Modifier.size(34.dp))
+                    }
+                }
+            }
         }
     }
 }

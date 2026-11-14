@@ -354,9 +354,11 @@ create table if not exists president_messages (
   district    text,
   text        text,
   audio_path  text,
+  media       jsonb not null default '[]',   -- photos and videos [{kind, path}]
   read_at     timestamptz,
   created_at  timestamptz not null default now()
 );
+alter table president_messages add column if not exists media jsonb not null default '[]';
 create index if not exists president_messages_time_idx on president_messages (created_at desc);
 
 -- Posters and banners members download and send to their local printer.

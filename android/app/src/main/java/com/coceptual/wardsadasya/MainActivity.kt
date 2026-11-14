@@ -699,12 +699,6 @@ internal fun HomeScreen(
                                 Modifier.fillMaxWidth().padding(start = 18.dp, end = 12.dp, top = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Image(
-                                    painterResource(R.drawable.logo), contentDescription = "कांग्रेस",
-                                    modifier = Modifier.size(28.dp).clip(CircleShape).background(Color.White),
-                                )
-                                Text(APP_NAME, color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.8.sp,
-                                    modifier = Modifier.padding(start = 8.dp).weight(1f))
                                 Box {
                                     GlassButton(Icons.Filled.Menu, "मेन्यू") { menuOpen = true }
                                     val unreadInbox = d.optInt("unread_inbox")
@@ -720,7 +714,13 @@ internal fun HomeScreen(
                                         }
                                     }
                                 }
-                                Spacer(Modifier.width(8.dp))
+                                Spacer(Modifier.width(10.dp))
+                                Image(
+                                    painterResource(R.drawable.logo), contentDescription = "कांग्रेस",
+                                    modifier = Modifier.size(28.dp).clip(CircleShape).background(Color.White),
+                                )
+                                Text(APP_NAME, color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.8.sp,
+                                    modifier = Modifier.padding(start = 8.dp).weight(1f))
                                 GlassButton(Icons.Filled.Refresh, "रीफ्रेश") { reload++ }
                                 Spacer(Modifier.width(8.dp))
                                 GlassButton(Icons.AutoMirrored.Filled.Logout, "नंबर बदलें", onLogout)
@@ -854,7 +854,7 @@ internal fun HomeScreen(
                             }
                             uploadTasks.forEach { t ->
                                 HorizontalDivider(color = Color(0xFFF0F2F6))
-                                TaskRow(t, perVideo = rule.optInt("task", PTS_TASK)) { onTask(t, shareTasks) }
+                                TaskRow(t, perVideo = PTS_TASK) { onTask(t, shareTasks) }
                             }
                         }
                     }
@@ -865,7 +865,7 @@ internal fun HomeScreen(
             item(key = "social") {
                 Column(Modifier.padding(top = 26.dp)) {
                     SectionTitle("देवेन्द्र यादव जी के पोस्ट", Modifier.padding(horizontal = 16.dp))
-                    SocialPosts(shareTasks, d.optJSONObject("social"), perShare = rule.optInt("share", PTS_SHARE)) { reload++ }
+                    SocialPosts(shareTasks, d.optJSONObject("social"), perShare = PTS_SHARE) { reload++ }
                 }
             }
 
@@ -1435,7 +1435,7 @@ internal fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBac
                                 val h = Api.call(ctx, "home", JSONObject().put("date", initial.optString("task_date")))
                                 val a = h.optJSONArray("tasks") ?: JSONArray()
                                 freshShares = (0 until a.length()).map { a.getJSONObject(it) }.filter { it.optString("kind") == "share" }
-                                perShare = h.optJSONObject("points_rule")?.optInt("share", PTS_SHARE) ?: PTS_SHARE
+                                perShare = PTS_SHARE
                             } catch (e: Exception) {}
                             done = true
                             showSuccessDialog = true
@@ -1839,9 +1839,10 @@ internal fun ProgressScreen(data: JSONObject?, onData: (JSONObject) -> Unit, nav
     }
     val stats = data?.optJSONObject("stats") ?: JSONObject()
     val rule = data?.optJSONObject("points_rule") ?: JSONObject()
-    val perShare = rule.optInt("share", PTS_SHARE)
-    val perTask = rule.optInt("task", PTS_TASK)
-    val perOwn = rule.optInt("own_task", PTS_OWN_TASK)
+    // Final scheme: 100 for every share (per post, per platform), every completed task and every approved own task.
+    val perShare = PTS_SHARE
+    val perTask = PTS_TASK
+    val perOwn = PTS_OWN_TASK
     var ranks by remember { mutableStateOf<JSONObject?>(null) }
     LaunchedEffect(Unit) { try { ranks = Api.call(ctx, "ranks").optJSONObject("ranks") } catch (e: Exception) {} }
 
@@ -1880,20 +1881,20 @@ internal fun ProgressScreen(data: JSONObject?, onData: (JSONObject) -> Unit, nav
                             }
                         }
                     }
-                    Text("आपके अंक ऐसे गिने जाते हैं", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Muted, modifier = Modifier.padding(start = 2.dp, top = 20.dp, bottom = 10.dp))
+                    Text("आपके अंक कैसे गिने जाते हैं?", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Muted, modifier = Modifier.padding(start = 2.dp, top = 20.dp, bottom = 10.dp))
                     CardBox {
                         PointsRow(Icons.Filled.Share, Color(0xFFE8F0FE), Blue, "सोशल मीडिया शेयर (हर पोस्ट, हर प्लेटफ़ॉर्म)", stats.optInt("shares"), perShare)
                         HorizontalDivider(color = Color(0xFFF0F2F6))
-                        PointsRow(Icons.Filled.Videocam, OrangeBg, Orange, "पूरे टास्क (2 फोटो + 2 वीडियो)", stats.optInt("full_tasks"), perTask)
+                        PointsRow(Icons.Filled.Videocam, OrangeBg, Orange, "टास्क पूरे करने के अंक (2 फोटो + 2 वीडियो)", stats.optInt("full_tasks"), perTask)
                         HorizontalDivider(color = Color(0xFFF0F2F6))
-                        PointsRow(Icons.Filled.AddTask, GreenBg, Green, "अपने टास्क (मंज़ूरी के बाद)", stats.optInt("own_tasks"), perOwn)
+                        PointsRow(Icons.Filled.AddTask, GreenBg, Green, "आपके द्वारा बनाए गए टास्क (मंज़ूरी के बाद)", stats.optInt("own_tasks"), perOwn)
                     }
                     Row(Modifier.padding(top = 10.dp, start = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Info, null, tint = Muted, modifier = Modifier.size(14.dp))
                         Text("  सब मिलाकर एक ही कुल अंक बनते हैं।", fontSize = 12.5.sp, color = Muted)
                     }
                     // Profile
-                    Text("मेरी प्रोफ़ाइल", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Muted, modifier = Modifier.padding(start = 2.dp, top = 22.dp, bottom = 10.dp))
+                    Text("मेरी प्रोफ़ाइल", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Ink, modifier = Modifier.padding(start = 2.dp, top = 22.dp, bottom = 10.dp))
                     Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color.White)
                             .border(1.dp, Line, RoundedCornerShape(20.dp)).clickable { onProfile() }.padding(14.dp),
@@ -1901,7 +1902,7 @@ internal fun ProgressScreen(data: JSONObject?, onData: (JSONObject) -> Unit, nav
                     ) {
                         IconTile(Icons.Filled.Person, Color(0xFFE8F0FE), Blue)
                         Column(Modifier.padding(start = 12.dp).weight(1f)) {
-                            Text("प्रोफ़ाइल एडिट करें", fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = Ink)
+                            Text("प्रोफ़ाइल एडिट करें", fontSize = 15.5.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
                             Text(
                                 when (profileStatus) {
                                     "pending" -> "मंज़ूरी का इंतज़ार है"
@@ -1931,7 +1932,7 @@ internal fun PointsRow(icon: ImageVector, bg: Color, fg: Color, label: String, c
         }
         Column(horizontalAlignment = Alignment.End) {
             Text(fmtNum(count * each), fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
-            Text("$count × $each", fontSize = 11.5.sp, color = Muted)
+            Text("$each × $count", fontSize = 11.5.sp, color = Muted)
         }
     }
 }
@@ -2191,26 +2192,26 @@ internal fun ProfileScreen(onBack: () -> Unit, onLogout: () -> Unit) {
             }
 
             OutlinedTextField(name, { name = it.take(80) }, label = { Text("पूरा नाम *") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+            DateField("जन्म तिथि *", dob) { dob = it }
+            ChoiceRow("लिंग *", listOf("male" to "पुरुष", "female" to "महिला", "other" to "अन्य"), gender) { gender = it }
             OutlinedTextField(details, { details = it.take(500) }, label = { Text("अपने बारे में (पद, काम आदि)") }, minLines = 2, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
             PickField("वार्ड नंबर", ward, wards) { ward = it }
-            PickField("विधानसभा", assembly, list("assemblies").map { it to it }) { assembly = it }
-            PickField("लोकसभा", lokSabha, list("lok_sabha").map { it to it }) { lokSabha = it }
+            PickField("विधानसभा", assembly, list("assemblies").ifEmpty { DELHI_ASSEMBLIES }.map { it to it }) { assembly = it }
+            PickField("लोकसभा", lokSabha, list("lok_sabha").ifEmpty { DELHI_LOK_SABHA }.map { it to it }) { lokSabha = it }
             PickField("ज़िला", district, list("districts").map { it to it }) { district = it }
+            ChoiceRow("वैवाहिक स्थिति *", listOf("yes" to "विवाहित", "no" to "अविवाहित"), when (married) { true -> "yes"; false -> "no"; else -> "" }) { married = it == "yes" }
+            if (married == true) DateField("शादी की सालगिरह / विवाह वर्षगांठ *", anniversary) { anniversary = it }
             OutlinedTextField(family, { v -> family = v.filter { it.isDigit() }.take(2) }, label = { Text("परिवार में सदस्यों की संख्या") }, singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
             OutlinedTextField(mobile, { v -> mobile = v.filter { it.isDigit() }.take(10) }, label = { Text("मोबाइल नंबर") }, singleLine = true, prefix = { Text("+91 ") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
             OutlinedTextField(altMobile, { v -> altMobile = v.filter { it.isDigit() }.take(10) }, label = { Text("वैकल्पिक मोबाइल नंबर") }, singleLine = true, prefix = { Text("+91 ") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
-            DateField("जन्म तिथि *", dob) { dob = it }
-            ChoiceRow("लिंग *", listOf("male" to "पुरुष", "female" to "महिला", "other" to "अन्य"), gender) { gender = it }
-            ChoiceRow("वैवाहिक स्थिति *", listOf("yes" to "विवाहित", "no" to "अविवाहित"), when (married) { true -> "yes"; false -> "no"; else -> "" }) { married = it == "yes" }
-            if (married == true) DateField("शादी की सालगिरह *", anniversary) { anniversary = it }
-            Text("सोशल मीडिया (ज़रूरी नहीं)", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.padding(top = 6.dp))
+            Text("आपके सोशल मीडिया अकाउंट्स के लिंक", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.padding(top = 6.dp))
             OutlinedTextField(linkFb, { linkFb = it.take(300) }, label = { Text("Facebook प्रोफ़ाइल लिंक") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
             OutlinedTextField(linkIg, { linkIg = it.take(300) }, label = { Text("Instagram प्रोफ़ाइल लिंक") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
             OutlinedTextField(linkX, { linkX = it.take(300) }, label = { Text("X (Twitter) प्रोफ़ाइल लिंक") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
-            Text("लॉगिन नंबर नहीं बदलेगा। यह जानकारी एडमिन की मंज़ूरी के बाद आपकी प्रोफ़ाइल में जुड़ेगी।", fontSize = 12.sp, color = Muted, lineHeight = 17.sp)
+            Text("आपका लॉगिन नंबर नहीं बदलेगा। यह जानकारी एडमिन की मंज़ूरी के बाद आपकी प्रोफ़ाइल में दिखने लगेगी।", fontSize = 12.sp, color = Muted, lineHeight = 17.sp)
         }
         Button(
             onClick = { save() }, enabled = !saving,
@@ -2262,3 +2263,19 @@ internal fun ChoiceRow(label: String, options: List<Pair<String, String>>, value
         }
     }
 }
+
+/** Delhi's 70 Vidhan Sabha seats (same list the server sends). */
+internal val DELHI_ASSEMBLIES = listOf("Narela", "Burari", "Timarpur", "Adarsh Nagar", "Badli", "Rithala", "Bawana", "Mundka", "Kirari",
+    "Sultanpur Majra", "Nangloi Jat", "Mangol Puri", "Rohini", "Shalimar Bagh", "Shakur Basti", "Tri Nagar", "Wazirpur",
+    "Model Town", "Sadar Bazar", "Chandni Chowk", "Matia Mahal", "Ballimaran", "Karol Bagh", "Patel Nagar", "Moti Nagar",
+    "Madipur", "Rajouri Garden", "Hari Nagar", "Tilak Nagar", "Janakpuri", "Vikaspuri", "Uttam Nagar", "Dwarka", "Matiala",
+    "Najafgarh", "Bijwasan", "Palam", "Delhi Cantt", "Rajinder Nagar", "New Delhi", "Jangpura", "Kasturba Nagar",
+    "Malviya Nagar", "R K Puram", "Mehrauli", "Chhatarpur", "Deoli", "Ambedkar Nagar", "Sangam Vihar", "Greater Kailash",
+    "Kalkaji", "Tughlakabad", "Badarpur", "Okhla", "Trilokpuri", "Kondli", "Patparganj", "Laxmi Nagar", "Vishwas Nagar",
+    "Krishna Nagar", "Gandhi Nagar", "Shahdara", "Seemapuri", "Rohtas Nagar", "Seelampur", "Ghonda", "Babarpur",
+    "Gokalpur", "Mustafabad", "Karawal Nagar").mapIndexed { i, n -> "${i + 1} - $n" }
+
+internal val DELHI_LOK_SABHA = listOf(
+    "चांदनी चौक (Chandni Chowk)", "उत्तर पूर्वी दिल्ली (North East Delhi)", "पूर्वी दिल्ली (East Delhi)", "नई दिल्ली (New Delhi)",
+    "उत्तर पश्चिम दिल्ली (North West Delhi)", "पश्चिमी दिल्ली (West Delhi)", "दक्षिणी दिल्ली (South Delhi)",
+)

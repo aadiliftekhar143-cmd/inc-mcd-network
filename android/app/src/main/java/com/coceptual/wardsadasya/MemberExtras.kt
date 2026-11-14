@@ -51,6 +51,7 @@ internal fun PostersScreen(onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().background(Ground)) {
         PageTop("पोस्टर और बैनर", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("पार्टी के कार्यक्रम से संबंधित पोस्टर और बैनर यहाँ से डाउनलोड करें।", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Ink)
             Text("डाउनलोड करें या WhatsApp पर अपने इलाके के प्रिंटर को भेजें।", fontSize = 13.sp, color = Muted)
             val l = list
             when {
@@ -196,10 +197,11 @@ internal fun OwnTasksScreen(onBack: () -> Unit, onLogout: () -> Unit) {
     Column(Modifier.fillMaxSize().background(Ground)) {
         PageTop("अपना टास्क जोड़ें", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("आपने अपने इलाके में जो काम किया, जैसे डोर टू डोर, प्रदर्शन या खराब सड़क पर वीडियो, उसे यहाँ जोड़ें। 2 फोटो और 2 वीडियो ज़रूरी हैं। एडमिन की मंज़ूरी के बाद +$PTS_OWN_TASK अंक मिलेंगे।",
+            Text("आप अपने इलाके में खुद से भी कार्यक्रम कर सकते हैं", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
+            Text("जैसे डोर टू डोर प्रचार, खराब सड़क पर वीडियो, पानी की गुणवत्ता की जांच, लोगों से मिलना या कोई मिलन समारोह। जो भी कार्यक्रम आप करें, उसे यहाँ जोड़ें। 2 फोटो और 2 वीडियो ज़रूरी हैं। एडमिन की मंज़ूरी के बाद +$PTS_OWN_TASK अंक मिलेंगे।",
                 fontSize = 13.sp, color = Muted, lineHeight = 19.sp)
             OutlinedTextField(title, { title = it.take(160) }, label = { Text("आपने क्या किया? *") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
-            OutlinedTextField(details, { details = it.take(1000) }, label = { Text("थोड़ा और बताएं (कहाँ, कब, कितने लोग)") }, minLines = 2, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+            OutlinedTextField(details, { details = it.take(1000) }, label = { Text("थोड़ा और बताएं (कब, कहाँ, कितने लोग)") }, minLines = 2, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
             listOf("photo" to photos, "video" to videos).forEach { (kind, have) ->
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color.White).border(1.dp, Line, RoundedCornerShape(14.dp)).padding(12.dp),
@@ -270,6 +272,10 @@ internal fun ToPresidentScreen(leader: Boolean, onBack: () -> Unit) {
     var text by remember { mutableStateOf("") }
     var voice by remember { mutableStateOf<File?>(null) }
     var sending by remember { mutableStateOf(false) }
+    var attach by remember { mutableStateOf(listOf<Pair<String, Uri>>()) }
+    var status by remember { mutableStateOf("") }
+    val pickPhotos = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { us -> attach = (attach + us.map { "photo" to it }).take(6) }
+    val pickVideos = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { us -> attach = (attach + us.map { "video" to it }).take(6) }
     Column(Modifier.fillMaxSize().background(Ground)) {
         PageTop("अध्यक्ष जी को संदेश", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -283,22 +289,36 @@ internal fun ToPresidentScreen(leader: Boolean, onBack: () -> Unit) {
             }
             OutlinedTextField(text, { text = it.take(2000) }, label = { Text("अपना संदेश लिखें") }, minLines = 5, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
             VoiceNote(voice) { voice = it }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { pickPhotos.launch("image/*") }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)) { Icon(Icons.Filled.PhotoCamera, null); Text(" फोटो जोड़ें") }
+                OutlinedButton(onClick = { pickVideos.launch("video/*") }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)) { Icon(Icons.Filled.Videocam, null); Text(" वीडियो जोड़ें") }
+            }
+            if (attach.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("${attach.count { it.first == "photo" }} फोटो, ${attach.count { it.first == "video" }} वीडियो जुड़े", fontSize = 13.sp, color = GreenText, modifier = Modifier.weight(1f))
+                TextButton(onClick = { attach = emptyList() }) { Text("हटाएं", color = Color(0xFF9B1C1C)) }
+            }
+            if (status.isNotBlank()) Text(status, fontSize = 13.sp, color = Blue)
             Button(
                 onClick = {
-                    if (text.isBlank() && voice == null) { Toast.makeText(ctx, "संदेश लिखें या वॉइस नोट रिकॉर्ड करें", Toast.LENGTH_SHORT).show(); return@Button }
+                    if (text.isBlank() && voice == null && attach.isEmpty()) { Toast.makeText(ctx, "संदेश लिखें या वॉइस नोट रिकॉर्ड करें", Toast.LENGTH_SHORT).show(); return@Button }
                     sending = true
                     scope.launch {
                         try {
                             var audio: String? = null
                             voice?.let { audio = uploadFile(ctx, leader, it, "audio", "audio/mp4", purpose = "president") }
-                            val p = JSONObject().put("text", text.trim()); audio?.let { p.put("audio_path", it) }
+                            val media = JSONArray()
+                            attach.forEachIndexed { i, (kind, uri) ->
+                                status = "अपलोड हो रहा है ${i + 1}/${attach.size}"
+                                media.put(JSONObject().put("kind", kind).put("path", uploadUri(ctx, leader, uri, kind, purpose = "president")))
+                            }
+                            val p = JSONObject().put("text", text.trim()).put("media", media); audio?.let { p.put("audio_path", it) }
                             if (leader) Api.leader(ctx, "to_president", p) else Api.call(ctx, "president_message", p)
                             Toast.makeText(ctx, "आपका संदेश अध्यक्ष जी तक भेज दिया गया।", Toast.LENGTH_LONG).show()
                             onBack()
                         } catch (e: Exception) {
                             Toast.makeText(ctx, "भेजा नहीं जा सका, इंटरनेट चेक करें", Toast.LENGTH_LONG).show()
                         }
-                        sending = false
+                        sending = false; status = ""
                     }
                 },
                 enabled = !sending, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(12.dp),
