@@ -1,157 +1,152 @@
-# INC MCD NETWORK (Ward Sadasya): app + admin panel
+# INC MCD NETWORK (दिल्ली प्रदेश कांग्रेस कमेटी)
 
-Three parts:
+[![Latest Release](https://img.shields.io/badge/version-v1.9%20(Build%2010)-blue.svg)](https://github.com/amandangi26/ward-sadasya/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-Android%20%7C%20Web%20Admin-green.svg)]()
+[![Backend](https://img.shields.io/badge/backend-Supabase%20Edge%20Functions-3ECF8E.svg)]()
+[![Portal](https://img.shields.io/badge/domain-congressdelhinetwork.com-1B4FA8.svg)](https://congressdelhinetwork.com/mcd)
 
-| Folder | What | Where it runs |
-| --- | --- | --- |
-| `supabase/` | Database, file storage, app API | Supabase |
-| `admin/` | Admin panel and analytics dashboard | Vercel |
-| `android/` | Android app for ward members (APK) | Built in Android Studio |
-
-Setup takes about 45 minutes, in this order.
+**INC MCD NETWORK** दिल्ली प्रदेश कांग्रेस कमेटी (DPCC) की आधिकारिक डिजिटल प्रबंधन प्रणाली है, जो दिल्ली के सभी **250 MCD वार्डों**, 70 विधानसभाओं और 14 ज़िलों के संगठन को एकजुट और सक्रिय रखती है।
 
 ---
 
+## 🏛️ प्रोजेक्ट आर्किटेक्चर (System Architecture)
 
-> **Upgrading to v1.3 (INC MCD NETWORK)?** Follow [Upgrade to v1.3](#upgrade-to-v13-inc-mcd-network) at the end. You need to re-run the schema, deploy two new functions and, for instant notifications, set up Firebase.
+प्रोजेक्ट तीन मुख्य घटकों से मिलकर बना है:
 
-## 1. Supabase (about 10 min)
-
-1. Create a new project in Supabase, region **Mumbai (ap-south-1)**. Upgrade it to the **Pro** plan: the free plan has only 1 GB of file storage, and the videos will be in the hundreds of GB.
-2. Open **SQL Editor**, paste all of `supabase/schema.sql`, and click **Run**.
-3. Deploy the app API. On the developer's laptop, with the Supabase CLI installed:
-   ```
-   supabase login
-   supabase link --project-ref YOUR-PROJECT-REF
-   supabase functions deploy app --no-verify-jwt
-   ```
-   (`--no-verify-jwt` is required. The app uses its own login by mobile number.)
-4. Create the admin login. Go to **Authentication > Users > Add user**, enter an email and password, and copy the new user's **ID**. Then run this in the SQL Editor:
-   ```sql
-   insert into admins (user_id, label) values ('PASTE-USER-ID', 'Rahil');
-   ```
-   Repeat for each person who needs the admin panel.
-5. Note down two values from **Project Settings > API**:
-   - Project URL, e.g. `https://abcd.supabase.co`
-   - `anon` public key
-
-## 2. Admin panel on Vercel (about 5 min)
-
-1. Push this whole folder to a GitHub repo.
-2. In Vercel, click **Add New > Project** and import the repo. Set **Root Directory** to `admin` (Vite is auto-detected).
-3. Add two **Environment Variables**:
-   - `VITE_SUPABASE_URL` = Project URL
-   - `VITE_SUPABASE_ANON_KEY` = anon key
-4. Deploy, then open the site and log in with the admin email.
-
-To run it locally instead: `cd admin && cp .env.example .env` (fill in both values), then `npm install && npm run dev`.
-
-## 3. Load the data (about 10 min)
-
-1. **Ward members tab > Download template.** Fill in `name`, `mobile`, `ward` (1 to 250). Optional columns: `ward name`, `zone`, `assembly`. The heat map groups wards by zone, so fill in zone if you have it.
-2. Click **Upload Excel**. Bad rows are skipped and listed by row number. Re-uploading the same numbers updates them.
-3. **Tasks tab > + New task.** Add each day's tasks:
-   - **Task with video upload:** set the number of videos (1 to 5). The member can tick only after at least 1 video is uploaded.
-   - **Share card:** for "watch and reshare" posts. Paste the X, Instagram, Facebook links and the WhatsApp text. It shows as buttons, not as a task.
-4. **Reminders and links tab:** fill in Devender Yadav ji's Facebook, X and Instagram links and the helpline number.
-5. **Leader messages tab:** upload a landscape video or an audio file.
-
-## 4. Android APK (about 20 min, needs Android Studio)
-
-1. Open the `android` folder in Android Studio (Koala or newer, JDK 17) and let Gradle sync. If it asks to create the Gradle wrapper, accept it.
-2. In `android/gradle.properties`, fill in:
-   ```
-   WS_API_URL=https://YOUR-PROJECT.supabase.co/functions/v1/app
-   WS_ANON_KEY=YOUR-ANON-KEY
-   ```
-3. Choose **Build > Build App Bundle(s) / APK(s) > Build APK(s)**. For the release variant, run `./gradlew assembleRelease`. It is signed with the debug key, which is fine for sharing the APK directly.
-4. The APK is in `android/app/build/outputs/apk/`. Send it to the calling team for WhatsApp.
-
-**Important:** build every future update on the same machine. Android only installs an update over the old app when both are signed with the same key.
-
-The code has not been compiled yet, so expect to fix the odd compile error during the first build.
-
-Alternative: GitHub can build the APK. Add repo secrets `WS_API_URL` and `WS_ANON_KEY`, then run **Actions > Build APK**.
-
-## 5. Before sending the APK to 1,400 people
-
-Test these on one real phone:
-
-- [ ] Log in with a number from the Excel. A number that is not on the list shows the helpline.
-- [ ] Upload a video. The tick button turns on, tick, and the dashboard shows the task as completed within 30 sec.
-- [ ] The leader message plays, and its view count goes up in the admin panel.
-- [ ] Allow notifications when the app asks.
+| फोल्डर | घटक | तकनीक | होस्टिंग / डिप्लॉयमेंट |
+| :--- | :--- | :--- | :--- |
+| **`android/`** | **Android App (APK)** | Native Kotlin, Jetpack Compose Material 3, OkHttp, Coil, WorkManager, FCM | GitHub Actions / Permanent Keystore Release (`v1.8`) |
+| **`admin/`** | **Admin & Calling Portal** | React 18, Vite, Lucide Icons, SheetJS (XLSX) | Vercel (`congressdelhinetwork.com/mcd`) |
+| **`supabase/`** | **Database & API** | PostgreSQL 17 (RLS), Supabase Storage, Deno Edge Functions | Supabase Cloud (`ap-south-1` Mumbai) |
 
 ---
 
-## How it works
+## 🌟 मुख्य विशेषताएँ (Key Features in v1.8)
 
-- **Login:** mobile number only, no OTP, as decided. Anyone who knows a member's number can log in as them. To block a number, go to **Ward members > Block/unblock**.
-- **Uploads:** files go straight from the phone to Supabase Storage. The size limit is 500 MB per file. The app must stay open during an upload, and a failed upload retries 3 times.
-- **Reminders:** there is no Firebase. The phone checks in with the server about every 3 hours. It shows a notification when tasks are pending, a new leader message is up, or the admin has sent a message. Android decides the exact timing, so reminders come roughly every 3 hours, not exactly at 7, 10 and 1. Some phone brands (Xiaomi, Vivo, Oppo) delay background checks to save battery. Exact-time pushes would need Firebase Cloud Messaging added later.
-- **Dashboard:** refreshes every 30 sec. Ranking is by tasks completed, then videos uploaded. There are no points or approvals.
-- **Day dates:** India time. Tasks show on their own date. Members can still upload to past days.
-- **Heat map:** wards are grouped by the zone or assembly from the Excel. A real ward boundary map can be added once the 250-ward map file is available.
-
-## Storage estimate
-
-At 1,000 active members × about 3 videos × 11 days, roughly 30,000 videos. If videos average 20 to 40 MB, that is about 0.6 to 1.2 TB. Supabase Pro includes 100 GB, and extra storage is billed per GB. Check the current Supabase pricing page before launch.
+### 1. एक ही ऐप में 5 नेतृत्व स्तर (5 Leadership Levels in One APK)
+लॉगिन नंबर के आधार पर ऐप ऑटोमैटिकली यूज़र की भूमिका पहचानता है:
+1. **माननीय DPCC अध्यक्ष (President):**
+   * संपूर्ण दिल्ली और ज़िला स्तरीय लाइव एनालिटिक्स एवं परफॉरमेंस रैंकिंग (Top & Bottom 5 ज़िले/वार्ड)।
+   * महासचिवों (GS) एवं ज़िला अध्यक्षों को वॉयस नोट के साथ सीधे टास्क असाइन करना।
+   * प्रेक्षकों की ग्राउंड विज़िट फील्ड रिपोर्ट्स और कार्यकर्ताओं के सीधे संदेशों की समीक्षा।
+   * "मेरी कॉल" — बेहतरीन व कमज़ोर प्रदर्शन करने वाले प्रेक्षकों/कार्यकर्ताओं से 1-टैप कॉलिंग।
+2. **महासचिव (General Secretary):**
+   * 10 स्मार्ट कॉलिंग सुझाव, ज़िला मॉनिटरिंग और नए टास्क निर्माण (अध्यक्ष जी के अनुमोदन पर सक्रिय)।
+3. **ज़िला अध्यक्ष (District President):**
+   * ज़िला रैंक और लाइव स्कोर, अध्यक्ष जी से प्राप्त टास्क, ऑब्जर्वर ट्रैकिंग और ज़िला-स्तरीय ब्रॉडकास्ट।
+4. **विधानसभा प्रेक्षक (Assembly Observer):**
+   * फील्ड विज़िट रिपोर्टिंग (फ़ोटो, वीडियो, ऑडियो वॉयस नोट एवं GPS लोकेशन)।
+   * कार्यकर्ताओं की 3-पॉइंट स्टार रेटिंग्स (ग्राउंड, कनेक्ट, बूथ)।
+   * अध्यक्ष जी को सीधा संदेश भेजने की सुविधा।
+5. **वार्ड कार्यकर्ता (Ward Member):**
+   * दैनिक टास्क पूर्ण करना (न्यूनतम 2 फ़ोटो + 2 वीडियो)।
+   * 1-क्लिक सोशल मीडिया शेयरिंग (WhatsApp, Facebook, X, Instagram)।
+   * **पोस्टर एवं बैनर:** पार्टी पोस्टर्स डाउनलोड कर स्थानीय प्रिंटर से प्रिंट कराने की सुविधा।
+   * **व्यक्तिगत इनबॉक्स:** नेतृत्व की ओर से सीधे व्यक्तिगत संदेश व ऑडियो।
+   * **खुद के टास्क (Own Tasks):** स्वयं किए गए संगठन कार्य को अपलोड कर अंक पाना।
+   * **अध्यक्ष जी को सीधा संदेश:** फ़ोटो और वीडियो अटैचमेंट्स के साथ सीधे DPCC अध्यक्ष तक बात पहुँचाना।
 
 ---
 
-## Upgrade to v1.3 (INC MCD NETWORK)
+### 2. 100-अंक योजना (Fixed 100-Points Scheme)
+v1.8 में अंक प्रणाली को पारदर्शी और सरल 100-पॉइंट्स पर निर्धारित किया गया है:
+* **सोशल शेयर:** प्रति टास्क और प्रति सोशल प्लेटफ़ॉर्म = **100 अंक**
+* **पूर्ण टास्क:** 2 फ़ोटो और 2 वीडियो के साथ टास्क पूरा करने पर = **100 अंक**
+* **खुद का टास्क:** कार्यकर्ता द्वारा स्वयं किए गए कार्य का एडमिन अप्रूवल = **100 अंक**
+*(केवल टास्क चेकबॉक्स टिक करने के शून्य अंक हैं; अंक अपलोड और शेयर से ही मिलते हैं।)*
 
-### What's new
+---
 
-| Area | Change |
-| --- | --- |
-| App | New name **INC MCD NETWORK**. Points (20 per video, 10 per photo, 15 per share; no points for the tick itself) on the home screen and a "मेरे अंक" screen. |
-| App | Share panel after every completed task and on the home screen: Retweet and Like on X, plus Facebook, Instagram and WhatsApp. Links open in the matching app; WhatsApp shares the text directly. |
-| App | Instant high-priority notifications through Firebase, with the 15-minute background check kept as a fallback. |
-| App | Bottom navigation bar (होम, संदेश, सूचनाएं, मेरे अंक) and a footer. Smoother screen transitions; home shows cached data instantly while refreshing. |
-| Admin | **Team** tab: the master admin creates telecallers (name, mobile, password, districts, remarks) and other admins. |
-| Admin | **Calling** tab: telecallers log in with mobile + password and see only their districts' members, sorted by who needs a call (not logged in, inactive, pending today, follow-up due). One-tap call and WhatsApp, call outcome, remarks and follow-up date. |
-| Admin | **Reports** tab: a full report per ward member (every task, video, photo, share and call) plus a task report with share counts. Excel exports. |
-| Admin | Notifications go out instantly; new tasks and leader messages can notify all members on save. |
-| Data | "Zone" is now "District" everywhere. The district list comes from the members Excel, so any number of districts works. |
+### 3. एडमिन एवं टेलीकॉलर पोर्टल (`/mcd`)
+* **लाइव यूआरएल:** `https://congressdelhinetwork.com/mcd` (रूट `/` स्वतः `/mcd` पर रीडायरेक्ट होता है)।
+* **आधुनिक लॉगिन:** डार्क नेवी तिरंगा थीम, इनपुट आइकॉन्स, पासवर्ड आई-टॉगल एवं 256-bit SSL एन्क्रिप्शन।
+* **प्रमुख मॉड्यूल्स:**
+  * **Analytics Dashboard:** 250 वार्डों का हीटमैप, दैनिक टास्क ग्राफ, घंटेवार अपलोड्स और टॉप परफॉर्मर्स।
+  * **Calling Panel:** ज़िलावार टेलीकॉलर्स के लिए समर्पित इंटरफ़ेस — 1-टैप कॉल/व्हाट्सएप, फॉलो-अप व आउटकम लॉगिंग।
+  * **Leaders Management:** अध्यक्ष, महासचिव, ज़िला अध्यक्ष और प्रेक्षकों की सूची, भूमिका व ज़िले तय करना।
+  * **Member Tasks:** कार्यकर्ताओं द्वारा स्वयं किए गए कार्यों की समीक्षा और 1-क्लिक अप्रूवल।
+  * **Messages to President:** कार्यकर्ताओं/प्रेक्षकों द्वारा अध्यक्ष जी को भेजे गए संदेश और अटैचमेंट्स।
+  * **Posters:** कार्यकर्ताओं के लिए हाई-रिज़ॉल्यूशन पार्टी बैनर और पोस्टर अपलोड करना।
+  * **Reports:** सभी वार्ड कार्यकर्ताओं की टास्क, मीडिया, शेयर और कॉलिंग रिपोर्ट + Excel डाउनलोड।
+  * **Profile Updates:** कार्यकर्ताओं के प्रोफ़ाइल अपडेट (जन्मतिथि, वैवाहिक वर्षगांठ, सोशल मीडिया लिंक्स) का अप्रूवल।
+  * **Settings:** ऐप वर्शन कंट्रोल, DPCC आधिकारिक सोशल लिंक्स, हेल्पलाइन और रिमाइंडर्स।
 
-### Steps
+---
 
-0. **Easiest: let GitHub deploy it.** Add the repo secret `SUPABASE_ACCESS_TOKEN` (Supabase > Account preferences > Access Tokens). Every push to main that changes `supabase/` then runs the schema and deploys all four functions (Actions > Deploy backend). You can also run it by hand from the Actions tab. The steps below are the manual way.
-1. **Re-run the schema.** Open Supabase **SQL Editor**, paste all of `supabase/schema.sql` and run it. It is safe on the existing database: it adds the new tables and the `district` columns, copies old zone values into district, and leaves your data alone.
-2. **Turn off public sign-ups.** Supabase **Authentication > Sign In / Providers > Email**: turn off **Allow new users to sign up**. Logins are now created only from the admin panel's Team tab.
-   > [!WARNING]
-   > The old schema made every new sign-up an admin. v1.3 removes that trigger. Check the `admins` table and delete any user you don't recognise.
-3. **Deploy the functions:**
+## 🚀 इंस्टॉलेशन एवं सेटअप गाइड (Setup Guide)
+
+### 1. Supabase बैकएंड सेटअप
+1. Supabase पर प्रोजेक्ट बनाएँ (Region: **Mumbai `ap-south-1`**)।
+2. **SQL Editor** में `supabase/schema.sql` का पूरा कोड रन करें।
+3. **Storage Buckets:** `uploads` (प्राइवेट), `leader` (पब्लिक) और `posters` (पब्लिक) बकेट्स स्वतः बन जाएँगे।
+4. **Edge Functions डिप्लॉय करें:**
    ```bash
    supabase functions deploy app --no-verify-jwt
    supabase functions deploy leader --no-verify-jwt
    supabase functions deploy push
    supabase functions deploy admin
    ```
-   `push` and `admin` keep JWT verification on: only signed-in admins can call them.
-4. **Firebase, for instant notifications (about 15 min):**
-   1. Go to [console.firebase.google.com](https://console.firebase.google.com), **Add project**, and turn off Google Analytics.
-   2. **Add app > Android**, package name `com.coceptual.wardsadasya`, and download `google-services.json`. Don't add the file to the project; just copy four values out of it:
+5. **मास्टर एडमिन यूजर जोड़ें:**
+   Supabase Authentication > Users में ईमेल/पासवर्ड से यूजर जोड़ें और उसका UUID कॉपी करके SQL में रन करें:
+   ```sql
+   insert into admins (user_id, label) values ('PASTE-USER-ID', 'Master Admin');
+   ```
 
-      | gradle.properties / GitHub secret | Value in google-services.json |
-      | --- | --- |
-      | `FCM_APP_ID` | `client[0].client_info.mobilesdk_app_id` |
-      | `FCM_API_KEY` | `client[0].api_key[0].current_key` |
-      | `FCM_PROJECT_ID` | `project_info.project_id` |
-      | `FCM_SENDER_ID` | `project_info.project_number` |
-   3. Put them in `android/gradle.properties`, or add them as GitHub repo secrets with the same names for the cloud build.
-   4. **Project settings > Service accounts > Generate new private key.** Store the whole JSON as a Supabase secret:
-      ```bash
-      supabase secrets set FIREBASE_SERVICE_ACCOUNT="$(cat service-account.json)"
-      ```
-   Without Firebase everything still works; notifications then arrive at the phone's next background check (up to about 15 minutes).
-5. **Build and publish the APK** (v1.3, build 4). After it is out, set **Notifications and links > Android App Latest Version Code** to `4` so older phones see the update prompt.
-6. **Create the telecallers** in the **Team** tab. Each one logs in at the admin panel URL with their mobile number and password.
+### 2. एडमिन पोर्टल डिप्लॉयमेंट (Vercel)
+1. Vercel पर रिपॉजिटरी इम्पोर्ट करें।
+2. **Root Directory:** `admin` सेट करें (Framework: Vite).
+3. **Environment Variables** जोड़ें:
+   * `VITE_SUPABASE_URL` = your-supabase-url
+   * `VITE_SUPABASE_ANON_KEY` = your-supabase-anon-key
+4. **कस्टम डोमेन (`congressdelhinetwork.com`):**
+   * Vercel Settings > Domains में `congressdelhinetwork.com` जोड़ें।
+   * DNS में `A` रिकॉर्ड (`@` $\rightarrow$ `76.76.21.21`) और `CNAME` (`www` $\rightarrow$ `cname.vercel-dns.com`) जोड़ें।
+   * `vercel.json` रूट `/` को स्वतः `/mcd` पर रीडायरेक्ट करता है और `/download` को APK डाउनलोड पेज पर मैप करता है।
 
-### Notes
+### 3. Android APK बिल्ड (CI/CD व लोकल)
+* **ऑटोमैटिक बिल्ड (GitHub Actions):**
+  * `main` ब्रांच में कोई भी बदलाव पुश होते ही `.github/workflows/android-apk.yml` स्वतः ट्रिगर होता है।
+  * यह रिलीज़ APK को स्थायी `release.keystore` से साइन करके GitHub Releases पर पब्लिश कर देता है।
+* **लोकल बिल्ड:**
+  ```bash
+  cd android
+  ./gradlew assembleRelease
+  ```
+  आउटपुट: `android/app/build/outputs/apk/release/app-release.apk`
 
-- Telecallers only see members whose district matches one of their districts (case and spaces ignored). Members with no district appear only for admins.
-- Share points count the first tap per task and platform. The app cannot confirm that the member actually retweeted or posted.
-- On phones with aggressive battery savers (Xiaomi, Vivo, Oppo, Realme), ask members to set the app's battery use to "No restrictions" for reliable notifications.
+---
 
+## 📱 ऐप डाउनलोड एवं अपडेट
+* **कार्यकर्ता डाउनलोड पेज:** `https://congressdelhinetwork.com/download`
+* **नवीनतम रिलीज़ डायरेक्ट लिंक:** [GitHub Latest Release](https://github.com/amandangi26/ward-sadasya/releases/latest)
+* **स्थायी साइनिंग की (Permanent Keystore):** सभी वर्शन्स एक ही स्थायी RSA 2048 की से साइन होते हैं, जिससे यूज़र्स को कभी पुराना ऐप हटाने (uninstall) की आवश्यकता नहीं होती।
+
+---
+
+## 📜 वर्शन इतिहास (Version Changelog)
+
+* **v1.9 (Build 10) - वर्तमान:**
+  * स्लाइड-इन मेन्यू (बाएँ से स्लाइड होने वाला मॉडर्न मेन्यू पैनल मय इनबॉक्स काउंट व प्रोफ़ाइल)।
+  * सर्च करने योग्य पिकर (वार्ड, विधानसभा एवं अन्य सभी लिस्ट्स सर्च बार के साथ)।
+  * सुरक्षित वॉयस नोट्स (रिकॉर्डिंग स्टेट इंडिकेटर एवं सेफ सेंड हैंडलिंग)।
+  * "अब तक आपका काम" अंक टैली (जुड़े हुए दिन, शेयर, पूर्ण टास्क, अपने टास्क का विस्तृत विवरण)।
+  * एडमिन पोर्टल: 5 ग्रुप्स में विभाजित मॉडर्न नेवी साइडबार।
+  * डेटा रीसेट वर्कफ़्लो (`.github/workflows/reset-data.yml` 'DELETE' सुरक्षा कन्फर्मेशन के साथ)।
+* **v1.8 (Build 9):**
+  * 100-अंक फिक्स्ड स्कीम (100 शेयर, 100 टास्क, 100 खुद का टास्क)।
+  * अध्यक्ष जी को संदेश में फ़ोटो व वीडियो अटैचमेंट्स।
+  * संपूर्ण वैवाहिक व व्यक्तिगत प्रोफ़ाइल (DOB, शादी की सालगिरह, सोशल लिंक्स)।
+  * ऑटोमैटिक बैकएंड डिप्लॉय वर्कफ़्लो।
+* **v1.7 (Build 8):**
+  * एक ऐप में पाँच नेतृत्व स्तर (President, GS, DP, Observer, Member)।
+  * प्रेक्षक फील्ड विज़िट रिपोर्ट्स (GPS, वॉयस, मीडिया), पोस्टर्स और इनबॉक्स।
+* **v1.6 (Build 7):**
+  * मल्टी-फ़ोटो अपलोड (अधिकतम 10 फ़ोटो), स्मार्ट 2-कॉलम शेयर ग्रिड, DPCC सोशल लिंक्स।
+* **v1.5 & v1.4:**
+  * स्टार रेटिंग्स, परमानेंट रिलीज़ कीस्टोर, और डेडिकेटेड डाउनलोड लैंडिंग पेज।
+* **v1.3:**
+  * INC MCD NETWORK रिब्रांडिंग, टेलीकॉलर कॉलिंग पैनल, फुल वार्ड रिपोर्ट्स और FCM पुश नोटिफिकेशन्स।
+
+---
+
+**© 2026 दिल्ली प्रदेश कांग्रेस कमेटी (DPCC) · सर्वाधिकार सुरक्षित**
