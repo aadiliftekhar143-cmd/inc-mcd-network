@@ -117,6 +117,7 @@ At 1,000 active members × about 3 videos × 11 days, roughly 30,000 videos. If 
 
 ### Steps
 
+0. **Easiest: let GitHub deploy it.** Add the repo secret `SUPABASE_ACCESS_TOKEN` (Supabase > Account preferences > Access Tokens). Every push to main that changes `supabase/` then runs the schema and deploys all four functions (Actions > Deploy backend). You can also run it by hand from the Actions tab. The steps below are the manual way.
 1. **Re-run the schema.** Open Supabase **SQL Editor**, paste all of `supabase/schema.sql` and run it. It is safe on the existing database: it adds the new tables and the `district` columns, copies old zone values into district, and leaves your data alone.
 2. **Turn off public sign-ups.** Supabase **Authentication > Sign In / Providers > Email**: turn off **Allow new users to sign up**. Logins are now created only from the admin panel's Team tab.
    > [!WARNING]
@@ -124,6 +125,7 @@ At 1,000 active members × about 3 videos × 11 days, roughly 30,000 videos. If 
 3. **Deploy the functions:**
    ```bash
    supabase functions deploy app --no-verify-jwt
+   supabase functions deploy leader --no-verify-jwt
    supabase functions deploy push
    supabase functions deploy admin
    ```

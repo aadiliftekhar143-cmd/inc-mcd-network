@@ -436,10 +436,13 @@ Deno.serve(async (req) => {
       const text = clean(body.text, 2000);
       const audio = clean(body.audio_path, 300);
       if (audio && !audio.startsWith(`to-president/${mobile}/`)) return json({ error: "bad_path" }, 400);
-      if (!text && !audio) return json({ error: "empty" }, 400);
+      const media = (Array.isArray(body.media) ? body.media : [])
+        .filter((m: any) => typeof m?.path === "string" && m.path.startsWith(`to-president/${mobile}/`))
+        .slice(0, 6).map((m: any) => ({ kind: m.kind === "video" ? "video" : "photo", path: m.path }));
+      if (!text && !audio && !media.length) return json({ error: "empty" }, 400);
       await db.from("president_messages").insert({
         mobile, sender_role: "member", sender_name: member.name, ward_no: member.ward_no,
-        assembly: member.assembly ?? null, district: memberDistrict(member) || null, text, audio_path: audio,
+        assembly: member.assembly ?? null, district: memberDistrict(member) || null, text, audio_path: audio, media,
       });
       return json({ ok: true });
     }

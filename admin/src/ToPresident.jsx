@@ -42,7 +42,7 @@ export default function ToPresident() {
   useEffect(() => { (async () => {
     const list = await fetchAll('president_messages', '*', (q) => q.order('created_at', { ascending: false }));
     setRows(list);
-    const paths = list.slice(0, 150).map((r) => r.audio_path).filter(Boolean);
+    const paths = list.slice(0, 150).flatMap((r) => [r.audio_path, ...(r.media || []).map((m) => m.path)]).filter(Boolean);
     if (paths.length) {
       const { data } = await supabase.storage.from('uploads').createSignedUrls(paths, 3600);
       setFiles(Object.fromEntries((data || []).filter((d) => d.signedUrl).map((d) => [d.path, d.signedUrl])));
@@ -91,6 +91,11 @@ export default function ToPresident() {
             </div>
             {r.text && <p style={{ margin: '6px 0' }}>{r.text}</p>}
             {r.audio_path && files[r.audio_path] && <audio controls src={files[r.audio_path]} style={{ width: 280 }} />}
+            {(r.media || []).length > 0 && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+              {r.media.map((m) => files[m.path] && (m.kind === 'video'
+                ? <video key={m.path} src={files[m.path]} controls style={{ width: 180, borderRadius: 8 }} />
+                : <a key={m.path} href={files[m.path]} target="_blank" rel="noreferrer"><img src={files[m.path]} alt="" style={{ width: 120, height: 90, objectFit: 'cover', borderRadius: 8 }} /></a>))}
+            </div>}
           </div>))}
         {!list.length && <p className="muted">No messages yet.</p>}
       </section>

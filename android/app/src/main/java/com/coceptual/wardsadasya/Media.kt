@@ -103,7 +103,7 @@ internal fun VoiceNote(file: File?, onChange: (File?) -> Unit) {
             }
             else -> {
                 Icon(Icons.Filled.Mic, null, tint = Color(0xFF6B7590))
-                Text("  वॉइस नोट (ज़रूरी नहीं)", fontSize = 14.sp, color = Color(0xFF6B7590), modifier = Modifier.weight(1f))
+                Text("  वॉइस नोट", fontSize = 14.sp, color = Color(0xFF6B7590), modifier = Modifier.weight(1f))
                 OutlinedButton(onClick = {
                     if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) start()
                     else askMic.launch(Manifest.permission.RECORD_AUDIO)
@@ -151,11 +151,12 @@ internal suspend fun uploadFile(ctx: Context, leader: Boolean, file: File, kind:
 }
 
 /** Uploads a picked photo or video (content Uri). */
-internal suspend fun uploadUri(ctx: Context, leader: Boolean, uri: Uri, kind: String): String {
+internal suspend fun uploadUri(ctx: Context, leader: Boolean, uri: Uri, kind: String, purpose: String? = null): String {
     val mime = ctx.contentResolver.getType(uri) ?: if (kind == "video") "video/mp4" else "image/jpeg"
     val ext = android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(mime) ?: if (kind == "video") "mp4" else "jpg"
     val size = Api.fileSize(ctx, uri)
     val params = JSONObject().put("kind", kind).put("ext", ext).put("size", size)
+    purpose?.let { params.put("purpose", it) }
     val u = if (leader) Api.leader(ctx, "upload_url", params) else Api.call(ctx, "own_upload_url", params)
     Api.upload(ctx, u.getString("signed_url"), uri, mime) {}
     return u.getString("path")
