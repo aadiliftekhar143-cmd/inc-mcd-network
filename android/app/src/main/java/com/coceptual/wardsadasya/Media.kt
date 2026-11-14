@@ -18,6 +18,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -46,14 +48,66 @@ internal val ROLE_HI = mapOf(
     "member" to "वार्ड सदस्य",
 )
 
+/** The three states a voice note can be in. Exactly one holds at a time. */
+private sealed interface Voice {
+    data object Idle : Voice
+    data class Recording(val recorder: MediaRecorder, val file: File) : Voice
+}
+
+/**
+ * The recording in progress on screen, if any. Send buttons check this through [rememberSendGuard],
+ * so a message can't go out while the microphone is still on (the voice note would be missing).
+ */
+internal object ActiveRecording {
+    var stop: (() -> Unit)? by mutableStateOf(null)
+    val isOn: Boolean get() = stop != null
+}
+
+/**
+ * Wraps a send action. If a voice note is still recording, the action does not run;
+ * a small prompt asks to stop the recording first.
+ */
+@Composable
+internal fun rememberSendGuard(): (action: () -> Unit) -> Unit {
+    var ask by remember { mutableStateOf(false) }
+    if (ask) {
+        AlertDialog(
+            onDismissRequest = { ask = false },
+            icon = { Icon(Icons.Filled.Mic, null, tint = Color(0xFFE5402F)) },
+            title = { Text("रिकॉर्डिंग अभी चल रही है", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+            text = { Text("भेजने से पहले रिकॉर्डिंग रोकें, तभी आपका वॉइस नोट साथ जाएगा।", fontSize = 14.sp, lineHeight = 20.sp) },
+            confirmButton = {
+                Button(onClick = { ActiveRecording.stop?.invoke(); ask = false }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE5402F))) {
+                    Icon(Icons.Filled.Stop, null, modifier = Modifier.size(18.dp)); Text(" रिकॉर्डिंग रोकें")
+                }
+            },
+            dismissButton = { TextButton(onClick = { ask = false }) { Text("वापस") } },
+        )
+    }
+    return { action -> if (ActiveRecording.isOn) ask = true else action() }
+}
+
 /** Records a voice note (m4a). Shows record / stop / play / remove. */
 @Composable
 internal fun VoiceNote(file: File?, onChange: (File?) -> Unit) {
     val ctx = LocalContext.current
-    var recorder by remember { mutableStateOf<MediaRecorder?>(null) }
+    var state by remember { mutableStateOf<Voice>(Voice.Idle) }
     var seconds by remember { mutableIntStateOf(0) }
-    var current by remember { mutableStateOf<File?>(null) }
 
+    fun stop() {
+        val rec = state as? Voice.Recording ?: return
+        val ok = try { rec.recorder.stop(); true } catch (_: Exception) { false }
+        rec.recorder.release()
+        state = Voice.Idle
+        ActiveRecording.stop = null
+        if (ok) {
+            onChange(rec.file)
+            Toast.makeText(ctx, "रिकॉर्डिंग सेव हो गई", Toast.LENGTH_SHORT).show()
+        } else {
+            onChange(null)
+            Toast.makeText(ctx, "रिकॉर्डिंग बहुत छोटी थी, दोबारा करें", Toast.LENGTH_SHORT).show()
+        }
+    }
     fun start() {
         val f = File(ctx.cacheDir, "voice-${System.currentTimeMillis()}.m4a")
         try {
@@ -66,33 +120,38 @@ internal fun VoiceNote(file: File?, onChange: (File?) -> Unit) {
             r.setAudioSamplingRate(44_100)
             r.setOutputFile(f.absolutePath)
             r.prepare(); r.start()
-            recorder = r; current = f; seconds = 0
+            seconds = 0
+            state = Voice.Recording(r, f)
+            ActiveRecording.stop = { stop() }
+            Toast.makeText(ctx, "रिकॉर्डिंग शुरू हो गई है", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(ctx, "रिकॉर्डिंग शुरू नहीं हो सकी", Toast.LENGTH_SHORT).show()
         }
     }
-    fun stop() {
-        try { recorder?.stop() } catch (_: Exception) { current = null }
-        recorder?.release(); recorder = null
-        onChange(current)
-    }
     val askMic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         if (ok) start() else Toast.makeText(ctx, "वॉइस नोट के लिए माइक की अनुमति दें", Toast.LENGTH_LONG).show()
     }
-    LaunchedEffect(recorder) {
-        while (recorder != null) { delay(1000); seconds++; if (seconds >= 300) stop() }
+    LaunchedEffect(state) {
+        while (state is Voice.Recording) { delay(1000); seconds++; if (seconds >= 300) stop() }
     }
-    DisposableEffect(Unit) { onDispose { try { recorder?.stop() } catch (_: Exception) {}; recorder?.release() } }
+    // Leaving the screen mid-recording: stop quietly and free the microphone.
+    DisposableEffect(Unit) {
+        onDispose {
+            (state as? Voice.Recording)?.let { try { it.recorder.stop() } catch (_: Exception) {}; it.recorder.release() }
+            ActiveRecording.stop = null
+        }
+    }
 
+    val recording = state is Voice.Recording
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFFF2F4F8))
-            .border(1.dp, Color(0xFFE3E7EF), RoundedCornerShape(12.dp)).padding(10.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (recording) Color(0xFFFDECEA) else Color(0xFFF2F4F8))
+            .border(1.dp, if (recording) Color(0xFFF3B4AC) else Color(0xFFE3E7EF), RoundedCornerShape(12.dp)).padding(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         when {
-            recorder != null -> {
+            recording -> {
                 Box(Modifier.size(10.dp).clip(CircleShape).background(Color(0xFFE5402F)))
-                Text("  रिकॉर्ड हो रहा है  ${seconds / 60}:${"%02d".format(seconds % 60)}", fontSize = 14.sp, modifier = Modifier.weight(1f))
+                Text("  रिकॉर्ड हो रहा है  ${seconds / 60}:${"%02d".format(seconds % 60)}", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 Button(onClick = { stop() }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE5402F)), shape = RoundedCornerShape(10.dp)) {
                     Icon(Icons.Filled.Stop, null, modifier = Modifier.size(18.dp)); Text(" रोकें")
                 }
@@ -244,5 +303,39 @@ internal fun rememberCaller(onLogged: () -> Unit = {}): (Callee) -> Unit {
             pending = null
             Toast.makeText(ctx, "डायलर नहीं खुल सका", Toast.LENGTH_SHORT).show()
         }
+    }
+}
+
+/** One row in the side menu. */
+internal class MenuItem(val icon: androidx.compose.ui.graphics.vector.ImageVector, val label: String, val badge: Int = 0, val danger: Boolean = false, val onClick: () -> Unit)
+
+/** The panel that slides in from the left: who is logged in, then the menu. */
+@Composable
+internal fun SideMenu(name: String, sub: String, items: List<MenuItem>, close: () -> Unit) {
+    val navy = Color(0xFF0E1B3D)
+    ModalDrawerSheet(drawerContainerColor = Color.White, drawerShape = RoundedCornerShape(topEnd = 20.dp, bottomEnd = 20.dp), modifier = Modifier.fillMaxWidth(0.82f)) {
+        Column(Modifier.fillMaxWidth().background(navy).padding(start = 20.dp, end = 16.dp, top = 28.dp, bottom = 20.dp)) {
+            androidx.compose.foundation.Image(
+                androidx.compose.ui.res.painterResource(R.drawable.logo), contentDescription = null,
+                modifier = Modifier.size(52.dp).clip(CircleShape).background(Color.White),
+            )
+            Text(name, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp), maxLines = 1)
+            Text(sub, color = Color(0xFFAFC0E3), fontSize = 13.sp, maxLines = 1)
+        }
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(vertical = 8.dp)) {
+            items.forEach { it ->
+                if (it.danger) HorizontalDivider(color = Color(0xFFE3E7EF), modifier = Modifier.padding(vertical = 6.dp))
+                Row(
+                    Modifier.fillMaxWidth().clickable { close(); it.onClick() }.padding(horizontal = 20.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(it.icon, null, tint = if (it.danger) Color(0xFF9B1C1C) else navy, modifier = Modifier.size(22.dp))
+                    Text(it.label, fontSize = 15.5.sp, fontWeight = FontWeight.Medium, color = if (it.danger) Color(0xFF9B1C1C) else Color(0xFF141C33), modifier = Modifier.padding(start = 16.dp).weight(1f))
+                    if (it.badge > 0) Text("${it.badge}", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clip(CircleShape).background(Color(0xFFE5402F)).padding(horizontal = 8.dp, vertical = 2.dp))
+                }
+            }
+        }
+        Text("$APP_NAME · v${BuildConfig.VERSION_NAME}", fontSize = 12.sp, color = Color(0xFF6B7590), modifier = Modifier.padding(20.dp))
     }
 }

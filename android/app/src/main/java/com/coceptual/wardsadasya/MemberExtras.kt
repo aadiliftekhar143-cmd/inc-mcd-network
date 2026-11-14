@@ -289,6 +289,7 @@ internal fun ToPresidentScreen(leader: Boolean, onBack: () -> Unit) {
             }
             OutlinedTextField(text, { text = it.take(2000) }, label = { Text("अपना संदेश लिखें") }, minLines = 5, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
             VoiceNote(voice) { voice = it }
+            val guard = rememberSendGuard()
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { pickPhotos.launch("image/*") }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)) { Icon(Icons.Filled.PhotoCamera, null); Text(" फोटो जोड़ें") }
                 OutlinedButton(onClick = { pickVideos.launch("video/*") }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)) { Icon(Icons.Filled.Videocam, null); Text(" वीडियो जोड़ें") }
@@ -299,8 +300,8 @@ internal fun ToPresidentScreen(leader: Boolean, onBack: () -> Unit) {
             }
             if (status.isNotBlank()) Text(status, fontSize = 13.sp, color = Blue)
             Button(
-                onClick = {
-                    if (text.isBlank() && voice == null && attach.isEmpty()) { Toast.makeText(ctx, "संदेश लिखें या वॉइस नोट रिकॉर्ड करें", Toast.LENGTH_SHORT).show(); return@Button }
+                onClick = { guard {
+                    if (text.isBlank() && voice == null && attach.isEmpty()) { Toast.makeText(ctx, "संदेश लिखें या वॉइस नोट रिकॉर्ड करें", Toast.LENGTH_SHORT).show(); return@guard }
                     sending = true
                     scope.launch {
                         try {
@@ -320,7 +321,7 @@ internal fun ToPresidentScreen(leader: Boolean, onBack: () -> Unit) {
                         }
                         sending = false; status = ""
                     }
-                },
+                } },
                 enabled = !sending, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Navy),
             ) {

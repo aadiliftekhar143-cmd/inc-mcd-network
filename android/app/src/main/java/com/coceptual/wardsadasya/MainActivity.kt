@@ -138,6 +138,16 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** Upload screen: idle, sending one file (with progress), or submitting the finished task. */
+internal sealed interface TaskPhase {
+    data object Idle : TaskPhase
+    data class Uploading(val kind: String, val progress: Float = 0f, val batch: String? = null) : TaskPhase
+    data object Submitting : TaskPhase
+}
+
+/** Login: the number that was found, waiting for the person to confirm it is them. */
+internal data class LoginMatch(val token: String, val role: String, val who: JSONObject)
+
 internal sealed class Screen {
     object Login : Screen()
     object Home : Screen()
@@ -289,9 +299,7 @@ internal fun LoginScreen(onDone: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var helpline by remember { mutableStateOf<String?>(null) }
-    var foundMember by remember { mutableStateOf<JSONObject?>(null) }
-    var token by remember { mutableStateOf<String?>(null) }
-    var loginRole by remember { mutableStateOf("member") }
+    var found by remember { mutableStateOf<LoginMatch?>(null) }
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
         Column(
@@ -310,10 +318,11 @@ internal fun LoginScreen(onDone: () -> Unit) {
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            if (foundMember == null) {
-                Text("अपना मोबाइल नंबर दर्ज करें", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            val match = found
+            if (match == null) {
+                Text("अपना मोबाइल नंबर डालें", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Text(
-                    "अपना 10 अंकों का मोबाइल नंबर डालें। यदि आपका विवरण रिकॉर्ड में उपलब्ध है, तो वह नीचे दिखाई देगा।",
+                    "वही 10 अंकों का नंबर डालें जो पार्टी के पास दर्ज है। नंबर सूची में होगा तो आपका नाम नीचे दिख जाएगा।",
                     color = Muted, fontSize = 14.sp, lineHeight = 20.sp,
                 )
 
@@ -322,7 +331,6 @@ internal fun LoginScreen(onDone: () -> Unit) {
                     onValueChange = { v ->
                         mobile = v.filter { it.isDigit() }.take(10)
                         error = null
-                        foundMember = null
                     },
                     prefix = { Text("+91  ", fontWeight = FontWeight.SemiBold) },
                     singleLine = true,
@@ -339,9 +347,11 @@ internal fun LoginScreen(onDone: () -> Unit) {
                         scope.launch {
                             try {
                                 val r = Api.call(ctx, "login", JSONObject().put("mobile", mobile))
-                                token = r.getString("token")
-                                loginRole = r.optString("role", "member").ifBlank { "member" }
-                                foundMember = r.optJSONObject("leader") ?: r.getJSONObject("member")
+                                found = LoginMatch(
+                                    token = r.getString("token"),
+                                    role = r.optString("role", "member").ifBlank { "member" },
+                                    who = r.optJSONObject("leader") ?: r.getJSONObject("member"),
+                                )
                             } catch (e: ApiError) {
                                 error = if (e.code == "not_registered") "यह नंबर सूची में नहीं मिला।" else "मोबाइल नंबर सही नहीं है।"
                                 helpline = e.body.optString("helpline").ifBlank { null }
@@ -356,7 +366,7 @@ internal fun LoginScreen(onDone: () -> Unit) {
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Blue),
                 ) {
-                    Text(if (busy) "जांच हो रही है…" else "विवरण देखें", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    Text(if (busy) "जांच हो रही है…" else "आगे बढ़ें", fontSize = 17.sp, fontWeight = FontWeight.Bold)
                 }
 
                 error?.let {
@@ -366,7 +376,7 @@ internal fun LoginScreen(onDone: () -> Unit) {
                     ) {
                         Text(it, color = OrangeText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                         Text(
-                            "यदि आपका नंबर एडमिन द्वारा अभी तक नहीं जोड़ा गया है, तो कृपया सहायता के लिए कॉल करें:",
+                            "आपका नंबर अभी सूची में नहीं जुड़ा है। हेल्पलाइन पर बात करें, हम जोड़ देंगे।",
                             color = OrangeText, fontSize = 13.sp,
                         )
                         helpline?.let { h ->
@@ -383,7 +393,8 @@ internal fun LoginScreen(onDone: () -> Unit) {
                     }
                 }
             } else {
-                val m = foundMember!!
+                val m = match.who
+                val loginRole = match.role
                 Column(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color(0xFFF0FDF4))
                         .border(1.5.dp, Green, RoundedCornerShape(16.dp)).padding(20.dp),
@@ -397,7 +408,7 @@ internal fun LoginScreen(onDone: () -> Unit) {
                             Icon(Icons.Filled.Check, null, tint = Green)
                         }
                         Text(
-                            "  सदस्य विवरण मिल गया",
+                            "  आपका नाम सूची में मिल गया",
                             color = GreenText, fontSize = 16.sp, fontWeight = FontWeight.Bold,
                         )
                     }
@@ -423,11 +434,9 @@ internal fun LoginScreen(onDone: () -> Unit) {
 
                 Button(
                     onClick = {
-                        token?.let {
-                            Store.setToken(ctx, it)
-                            Store.setRole(ctx, loginRole)
-                            onDone()
-                        }
+                        Store.setToken(ctx, match.token)
+                        Store.setRole(ctx, match.role)
+                        onDone()
                     },
                     modifier = Modifier.fillMaxWidth().height(56.dp),
                     shape = RoundedCornerShape(12.dp),
@@ -438,9 +447,7 @@ internal fun LoginScreen(onDone: () -> Unit) {
 
                 TextButton(
                     onClick = {
-                        foundMember = null
-                        token = null
-                        loginRole = "member"
+                        found = null
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -531,7 +538,7 @@ internal fun PageTop(title: String, onBack: () -> Unit) {
 @Composable
 internal fun SectionTitle(text: String, modifier: Modifier = Modifier, action: (@Composable () -> Unit)? = null) {
     Row(modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(text, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Ink, modifier = Modifier.weight(1f))
+        Text(text, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.weight(1f))
         action?.invoke()
     }
 }
@@ -579,7 +586,8 @@ internal fun HomeScreen(
     onMenu: (String) -> Unit = {},
 ) {
     val ctx = LocalContext.current
-    var menuOpen by remember { mutableStateOf(false) }
+    val drawer = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
     var date by remember { mutableStateOf(cached?.str("date")) }
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
@@ -672,6 +680,25 @@ internal fun HomeScreen(
     val leaderMsg = d.optJSONObject("leader")
     val district = member.str("district") ?: member.str("zone")
 
+    BackHandler(enabled = drawer.isOpen) { scope.launch { drawer.close() } }
+    ModalNavigationDrawer(
+        drawerState = drawer,
+        drawerContent = {
+            SideMenu(
+                name = "${member.optString("name").trim()} Ji",
+                sub = "वार्ड ${member.optInt("ward_no")}" + (district?.let { " · $it" } ?: ""),
+                items = listOf(
+                    MenuItem(Icons.Filled.MarkEmailUnread, "मेरा इनबॉक्स", badge = d.optInt("unread_inbox")) { onMenu("inbox") },
+                    MenuItem(Icons.Filled.Image, "पोस्टर और बैनर") { onMenu("posters") },
+                    MenuItem(Icons.Filled.AddTask, "अपना टास्क जोड़ें") { onMenu("own") },
+                    MenuItem(Icons.Filled.RecordVoiceOver, "अध्यक्ष जी को संदेश भेजें") { onMenu("president") },
+                    MenuItem(Icons.Filled.Person, "प्रोफ़ाइल एडिट करें") { onMenu("profile") },
+                    MenuItem(Icons.AutoMirrored.Filled.Logout, "लॉगआउट", danger = true) { onLogout() },
+                ),
+                close = { scope.launch { drawer.close() } },
+            )
+        },
+    ) {
     Scaffold(
         containerColor = Ground,
         bottomBar = { BottomBar(selected = "home", nav = nav.copyWithHome { reload++ }) },
@@ -700,19 +727,8 @@ internal fun HomeScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Box {
-                                    GlassButton(Icons.Filled.Menu, "मेन्यू") { menuOpen = true }
-                                    val unreadInbox = d.optInt("unread_inbox")
-                                    if (unreadInbox > 0) Box(Modifier.align(Alignment.TopEnd).size(10.dp).clip(CircleShape).background(Color(0xFFE5402F)))
-                                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                                        listOf(
-                                            Triple("inbox", Icons.Filled.MarkEmailUnread, "मेरा इनबॉक्स" + if (unreadInbox > 0) " ($unreadInbox नए)" else ""),
-                                            Triple("posters", Icons.Filled.Image, "पोस्टर और बैनर"),
-                                            Triple("own", Icons.Filled.AddTask, "अपना टास्क जोड़ें"),
-                                            Triple("president", Icons.Filled.RecordVoiceOver, "अध्यक्ष जी को संदेश भेजें"),
-                                        ).forEach { (k, ic, label) ->
-                                            DropdownMenuItem(leadingIcon = { Icon(ic, null, tint = Navy) }, text = { Text(label, fontSize = 15.sp) }, onClick = { menuOpen = false; onMenu(k) })
-                                        }
-                                    }
+                                    GlassButton(Icons.Filled.Menu, "मेन्यू") { scope.launch { drawer.open() } }
+                                    if (d.optInt("unread_inbox") > 0) Box(Modifier.align(Alignment.TopEnd).size(10.dp).clip(CircleShape).background(Color(0xFFE5402F)))
                                 }
                                 Spacer(Modifier.width(10.dp))
                                 Image(
@@ -722,8 +738,6 @@ internal fun HomeScreen(
                                 Text(APP_NAME, color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.8.sp,
                                     modifier = Modifier.padding(start = 8.dp).weight(1f))
                                 GlassButton(Icons.Filled.Refresh, "रीफ्रेश") { reload++ }
-                                Spacer(Modifier.width(8.dp))
-                                GlassButton(Icons.AutoMirrored.Filled.Logout, "नंबर बदलें", onLogout)
                             }
                             Column(Modifier.align(Alignment.TopStart).fillMaxWidth(0.52f).padding(start = 18.dp, top = 58.dp)) {
                                 Text("Namaste,", color = Color(0xFFAFC0E3), fontSize = 13.sp)
@@ -871,6 +885,7 @@ internal fun HomeScreen(
 
             item(key = "footer") { AppFooter(helpline = d.str("helpline")) }
         }
+    }
     }
 }
 
@@ -1261,12 +1276,16 @@ internal fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBac
     var videos by remember { mutableIntStateOf(initial.optInt("videos")) }
     var photos by remember { mutableIntStateOf(initial.optInt("photos")) }
     var done by remember { mutableStateOf(initial.optBoolean("done")) }
-    var progress by remember { mutableStateOf<Float?>(null) }
-    var uploadingKind by remember { mutableStateOf<String?>(null) }
-    var submitting by remember { mutableStateOf(false) }
+    // What the screen is doing right now. Exactly one of: idle, uploading a file, or submitting the task.
+    var phase by remember { mutableStateOf<TaskPhase>(TaskPhase.Idle) }
+    val uploading = phase as? TaskPhase.Uploading
+    val uploadingKind = uploading?.kind
+    val progress = uploading?.progress
+    val photoBatch = uploading?.batch
+    val submitting = phase is TaskPhase.Submitting
+    fun setProgress(v: Float) { (phase as? TaskPhase.Uploading)?.let { phase = it.copy(progress = v) } }
     var showSuccessDialog by remember { mutableStateOf(false) }
     var earned by remember { mutableIntStateOf(0) }
-    var photoBatch by remember { mutableStateOf<String?>(null) }
     var freshShares by remember { mutableStateOf(shareTasks) }
     var perShare by remember { mutableIntStateOf(PTS_SHARE) }
     var totalPoints by remember { mutableIntStateOf(-1) }
@@ -1294,20 +1313,20 @@ internal fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBac
         val maxBytes = 50L * 1024 * 1024 // 50 MB limit for Supabase Storage
         if (size > maxBytes) {
             val mb = (size / (1024 * 1024)).toInt()
-            Toast.makeText(ctx, "फाइल $mb MB की है। कृपया 50 MB से छोटी फाइल चुनें।", Toast.LENGTH_LONG).show()
+            Toast.makeText(ctx, "यह फाइल $mb MB की है। 50 MB से छोटी फाइल चुनें।", Toast.LENGTH_LONG).show()
             return true
         }
         val ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mime) ?: if (kind == "video") "mp4" else "jpg"
-        progress = 0f
+        setProgress(0f)
             try {
                 val u = Api.call(ctx, "upload_url", JSONObject().put("task_id", taskId).put("kind", kind).put("ext", ext).put("size", size))
                 var lastErr: Exception? = null
                 var ok = false
                 for (attempt in 1..3) {
                     try {
-                        Api.upload(ctx, u.getString("signed_url"), uri, mime) { p -> progress = p }
+                        Api.upload(ctx, u.getString("signed_url"), uri, mime) { p -> setProgress(p) }
                         ok = true; break
-                    } catch (e: Exception) { lastErr = e; progress = 0f }
+                    } catch (e: Exception) { lastErr = e; setProgress(0f) }
                 }
                 if (!ok) throw lastErr ?: Exception("upload")
                 val r = Api.call(ctx, "attach", JSONObject().put("task_id", taskId).put("kind", kind).put("path", u.getString("path")).put("size", size))
@@ -1327,7 +1346,7 @@ internal fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBac
                     }
                     e.code.startsWith("upload_failed_") -> {
                         val status = e.code.removePrefix("upload_failed_")
-                        Toast.makeText(ctx, "अपलोड असफल (कोड $status)। कृपया दोबारा कोशिश करें।", Toast.LENGTH_LONG).show()
+                        Toast.makeText(ctx, "अपलोड नहीं हो पाया (कोड $status)। एक बार फिर कोशिश करें।", Toast.LENGTH_LONG).show()
                     }
                     else -> Toast.makeText(ctx, "अपलोड नहीं हुआ (${e.code})", Toast.LENGTH_LONG).show()
                 }
@@ -1338,8 +1357,8 @@ internal fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBac
     }
 
     fun upload(uri: Uri, kind: String) {
-        uploadingKind = kind
-        scope.launch { uploadOne(uri, kind); uploadingKind = null; progress = null; photoBatch = null }
+        phase = TaskPhase.Uploading(kind)
+        scope.launch { uploadOne(uri, kind); phase = TaskPhase.Idle }
     }
 
     fun uploadPhotos(uris: List<Uri>) {
@@ -1348,13 +1367,13 @@ internal fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBac
         val list = uris.take(room)
         if (list.isEmpty()) { Toast.makeText(ctx, "इस टास्क में $NEED_PHOTOS फोटो जुड़ चुकी हैं", Toast.LENGTH_LONG).show(); return }
         if (uris.size > room) Toast.makeText(ctx, "सिर्फ़ $room और फोटो जुड़ सकती हैं, पहली $room जोड़ी जा रही हैं", Toast.LENGTH_LONG).show()
-        uploadingKind = "photo"
+        phase = TaskPhase.Uploading("photo")
         scope.launch {
             for ((i, u) in list.withIndex()) {
-                photoBatch = "${i + 1}/${list.size}"
+                phase = TaskPhase.Uploading("photo", batch = "${i + 1}/${list.size}")
                 if (!uploadOne(u, "photo")) break
             }
-            uploadingKind = null; progress = null; photoBatch = null
+            phase = TaskPhase.Idle
         }
     }
 
@@ -1380,7 +1399,7 @@ internal fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBac
                 Chip("2 फोटो + 2 वीडियो · +$PTS_TASK अंक", Ground, Color(0xFF3B4250))
             }
 
-            Text("अटैचमेंट", fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
+            Text("फोटो और वीडियो", fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
 
             // Videos
             Column(
@@ -1425,7 +1444,7 @@ internal fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBac
             }
             Button(
                 onClick = {
-                    submitting = true
+                    phase = TaskPhase.Submitting
                     scope.launch {
                         try {
                             val r = Api.call(ctx, "complete", JSONObject().put("task_id", taskId))
@@ -1442,7 +1461,7 @@ internal fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBac
                         } catch (e: Exception) {
                             Toast.makeText(ctx, "जमा नहीं हुआ, फिर कोशिश करें", Toast.LENGTH_LONG).show()
                         }
-                        submitting = false
+                        phase = TaskPhase.Idle
                     }
                 },
                 enabled = videos >= NEED_VIDEOS && photos >= NEED_PHOTOS && !busy && !submitting,
@@ -1483,7 +1502,7 @@ internal fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBac
             },
             title = {
                 Text(
-                    text = "टास्क सफलतापूर्वक जमा हुआ!",
+                    text = "टास्क जमा हो गया",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = Ink,
@@ -1498,7 +1517,7 @@ internal fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBac
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "आपका टास्क और वीडियो सफलतापूर्वक रिकॉर्ड कर लिया गया है। धन्यवाद!",
+                        text = "आपकी फोटो और वीडियो हम तक पहुँच गई हैं। धन्यवाद!",
                         fontSize = 14.sp,
                         color = Muted,
                         textAlign = TextAlign.Center
@@ -1530,11 +1549,11 @@ internal fun TaskScreen(initial: JSONObject, shareTasks: List<JSONObject>, onBac
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(Icons.Filled.Videocam, null, tint = Ink, modifier = Modifier.size(17.dp))
-                        Text(" $videos वीडियो दर्ज", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                        Text(" $videos वीडियो", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ink)
                         if (photos > 0) {
                             Text("   •   ", color = Muted)
                             Icon(Icons.Filled.PhotoCamera, null, tint = Ink, modifier = Modifier.size(16.dp))
-                            Text(" $photos फोटो दर्ज", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                            Text(" $photos फोटो", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ink)
                         }
                     }
                     // Only posts this member has not shared yet; once shared they don't come back after the next upload.
@@ -1881,17 +1900,43 @@ internal fun ProgressScreen(data: JSONObject?, onData: (JSONObject) -> Unit, nav
                             }
                         }
                     }
-                    Text("आपके अंक कैसे गिने जाते हैं?", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Muted, modifier = Modifier.padding(start = 2.dp, top = 20.dp, bottom = 10.dp))
+                    // 1. The rules
+                    Text("आपके अंक कैसे गिने जाते हैं?", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.padding(start = 2.dp, top = 22.dp, bottom = 10.dp))
                     CardBox {
-                        PointsRow(Icons.Filled.Share, Color(0xFFE8F0FE), Blue, "सोशल मीडिया शेयर (हर पोस्ट, हर प्लेटफ़ॉर्म)", stats.optInt("shares"), perShare)
+                        RuleRow(Icons.Filled.Share, Color(0xFFE8F0FE), Blue, "सोशल मीडिया शेयर (हर पोस्ट, हर प्लेटफ़ॉर्म)", perShare)
                         HorizontalDivider(color = Color(0xFFF0F2F6))
-                        PointsRow(Icons.Filled.Videocam, OrangeBg, Orange, "टास्क पूरे करने के अंक (2 फोटो + 2 वीडियो)", stats.optInt("full_tasks"), perTask)
+                        RuleRow(Icons.Filled.Videocam, OrangeBg, Orange, "टास्क पूरे करने के अंक (2 फोटो + 2 वीडियो)", perTask)
                         HorizontalDivider(color = Color(0xFFF0F2F6))
-                        PointsRow(Icons.Filled.AddTask, GreenBg, Green, "आपके द्वारा बनाए गए टास्क (मंज़ूरी के बाद)", stats.optInt("own_tasks"), perOwn)
+                        RuleRow(Icons.Filled.AddTask, GreenBg, Green, "आपके द्वारा बनाए गए टास्क (मंज़ूरी के बाद)", perOwn)
                     }
                     Row(Modifier.padding(top = 10.dp, start = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Info, null, tint = Muted, modifier = Modifier.size(14.dp))
                         Text("  सब मिलाकर एक ही कुल अंक बनते हैं।", fontSize = 12.5.sp, color = Muted)
+                    }
+
+                    // 2. What this member has done so far
+                    val shares = stats.optInt("shares"); val fullTasks = stats.optInt("full_tasks")
+                    val ownApproved = stats.optInt("own_tasks"); val ownPending = stats.optInt("own_pending")
+                    val ownTotal = maxOf(stats.optInt("own_total"), ownApproved + ownPending)
+                    val joined = parseYmd(data?.optJSONObject("member")?.optString("first_login_at").orEmpty())
+                    val days = joined?.let { ((System.currentTimeMillis() - it.timeInMillis) / 86_400_000L).toInt() + 1 }
+                    Text("अब तक आपका काम", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.padding(start = 2.dp, top = 22.dp, bottom = 10.dp))
+                    CardBox {
+                        days?.let {
+                            DoneRow("ऐप से जुड़े हुए", "$it दिन", null)
+                            HorizontalDivider(color = Color(0xFFF0F2F6))
+                        }
+                        DoneRow("सोशल मीडिया शेयर", "$shares शेयर", shares * perShare)
+                        HorizontalDivider(color = Color(0xFFF0F2F6))
+                        DoneRow("पूरे किए गए टास्क", "$fullTasks टास्क", fullTasks * perTask)
+                        HorizontalDivider(color = Color(0xFFF0F2F6))
+                        DoneRow(
+                            "आपके बनाए टास्क",
+                            "$ownTotal बनाए · $ownApproved मंज़ूर" + if (ownPending > 0) " · $ownPending की मंज़ूरी बाकी" else "",
+                            ownApproved * perOwn,
+                        )
+                        if (ownPending > 0) Text("बाकी $ownPending टास्क के अंक मंज़ूरी मिलते ही जुड़ जाएंगे।", fontSize = 12.sp, color = OrangeText,
+                            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp))
                     }
                     // Profile
                     Text("मेरी प्रोफ़ाइल", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Ink, modifier = Modifier.padding(start = 2.dp, top = 22.dp, bottom = 10.dp))
@@ -2036,7 +2081,7 @@ internal fun squarePhoto(ctx: Context, uri: Uri): File? = try {
     }
 } catch (e: Exception) { null }
 
-/** Text field that opens a list to pick from. */
+/** Field that opens a full list to pick from, with search when the list is long. */
 @Composable
 internal fun PickField(label: String, value: String, options: List<Pair<String, String>>, onPick: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
@@ -2049,9 +2094,39 @@ internal fun PickField(label: String, value: String, options: List<Pair<String, 
         )
         // Transparent layer so the whole field opens the list.
         Box(Modifier.matchParentSize().padding(top = 8.dp).clip(RoundedCornerShape(12.dp)).clickable { open = true })
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }, modifier = Modifier.heightIn(max = 360.dp)) {
-            options.forEach { (v, text) ->
-                DropdownMenuItem(text = { Text(text, fontSize = 14.sp) }, onClick = { onPick(v); open = false })
+    }
+    if (open) PickerDialog(label, value, options, onDismiss = { open = false }) { onPick(it); open = false }
+}
+
+@Composable
+internal fun PickerDialog(title: String, value: String, options: List<Pair<String, String>>, onDismiss: () -> Unit, onPick: (String) -> Unit) {
+    var query by remember { mutableStateOf("") }
+    val list = remember(query, options) { if (query.isBlank()) options else options.filter { it.second.contains(query.trim(), ignoreCase = true) } }
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).clip(RoundedCornerShape(20.dp)).background(Color.White)) {
+            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("$title चुनें", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.weight(1f))
+                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, "बंद करें", tint = Muted) }
+            }
+            if (options.size > 8) OutlinedTextField(
+                query, { query = it }, placeholder = { Text("खोजें") }, singleLine = true,
+                leadingIcon = { Icon(Icons.Filled.Search, null, tint = Muted) },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), shape = RoundedCornerShape(12.dp),
+            )
+            HorizontalDivider(color = Line, modifier = Modifier.padding(top = 6.dp))
+            LazyColumn(Modifier.weight(1f, fill = false)) {
+                items(list, key = { it.first }) { (v, text) ->
+                    val on = v == value
+                    Row(
+                        Modifier.fillMaxWidth().background(if (on) OrangeBg else Color.Transparent).clickable { onPick(v) }.padding(horizontal = 20.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(text, fontSize = 15.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, color = Ink, modifier = Modifier.weight(1f))
+                        if (on) Icon(Icons.Filled.Check, null, tint = Orange, modifier = Modifier.size(20.dp))
+                    }
+                    HorizontalDivider(color = Color(0xFFF0F2F6))
+                }
+                if (list.isEmpty()) item { Text("कुछ नहीं मिला", color = Muted, modifier = Modifier.padding(20.dp)) }
             }
         }
     }
@@ -2182,7 +2257,6 @@ internal fun ProfileScreen(onBack: () -> Unit, onLogout: () -> Unit) {
                 ProfilePhoto(newPhoto ?: photoUrl, 84) { pickPhoto.launch("image/*") }
                 Column(Modifier.padding(start = 16.dp).weight(1f)) {
                     Text("प्रोफ़ाइल फोटो", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    Text("चौकोर (1:1) फोटो अपने आप बन जाएगी", color = Color(0xFFAFC0E3), fontSize = 12.sp)
                     OutlinedButton(
                         onClick = { pickPhoto.launch("image/*") }, modifier = Modifier.padding(top = 8.dp).height(38.dp),
                         shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, Color(0x55FFFFFF)),
@@ -2279,3 +2353,25 @@ internal val DELHI_LOK_SABHA = listOf(
     "चांदनी चौक (Chandni Chowk)", "उत्तर पूर्वी दिल्ली (North East Delhi)", "पूर्वी दिल्ली (East Delhi)", "नई दिल्ली (New Delhi)",
     "उत्तर पश्चिम दिल्ली (North West Delhi)", "पश्चिमी दिल्ली (West Delhi)", "दक्षिणी दिल्ली (South Delhi)",
 )
+
+/** One line of the points rules: what earns points and how many. */
+@Composable
+internal fun RuleRow(icon: ImageVector, bg: Color, fg: Color, label: String, each: Int) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
+        IconTile(icon, bg, fg)
+        Text(label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Ink, modifier = Modifier.padding(start = 12.dp, end = 8.dp).weight(1f))
+        Text("$each अंक", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Green)
+    }
+}
+
+/** One line of the member's own tally: what, how many, and the points it earned. */
+@Composable
+internal fun DoneRow(label: String, count: String, points: Int?) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+            Text(count, fontSize = 12.5.sp, color = Muted)
+        }
+        points?.let { Text("${fmtNum(it)} अंक", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Ink) }
+    }
+}

@@ -16,25 +16,20 @@ import Leaders from './Leaders.jsx';
 import MemberTasks from './MemberTasks.jsx';
 import ToPresident from './ToPresident.jsx';
 import Posters from './Posters.jsx';
+import { BarChart3, ClipboardList, Users, UserCheck, Phone, Bell, MessageCircle, ImageIcon, SettingsIcon } from './icons.jsx';
+import { FileText, ListChecks, Network, ShieldCheck, Video, LogOut } from 'lucide-react';
 
 const APP_NAME = 'INC MCD NETWORK';
 
-const ADMIN_TABS = [
-  ['dashboard', 'Analytics'],
-  ['reports', 'Reports'],
-  ['calling', 'Calling'],
-  ['tasks', 'Tasks'],
-  ['members', 'Ward members'],
-  ['messages', 'Leader messages'],
-  ['reminders', 'Notifications'],
-  ['leaders', 'Leaders'],
-  ['membertasks', 'Member tasks'],
-  ['topresident', 'Messages to President'],
-  ['posters', 'Posters'],
-  ['profiles', 'Profile updates'],
-  ['team', 'Team'],
-  ['settings', 'Settings'],
+// Sidebar groups for the admin. Each entry: [id, label, icon].
+const ADMIN_GROUPS = [
+  ['Overview', [['dashboard', 'Analytics', BarChart3], ['reports', 'Reports', FileText]]],
+  ['Field work', [['tasks', 'Tasks', ClipboardList], ['membertasks', 'Member tasks', ListChecks], ['leaders', 'Leaders', Network]]],
+  ['People', [['members', 'Ward members', Users], ['profiles', 'Profile updates', UserCheck], ['calling', 'Calling', Phone], ['team', 'Team', ShieldCheck]]],
+  ['Communication', [['messages', 'Leader messages', Video], ['reminders', 'Notifications', Bell], ['topresident', 'Messages to President', MessageCircle], ['posters', 'Posters', ImageIcon]]],
+  ['Setup', [['settings', 'Settings', SettingsIcon]]],
 ];
+const ADMIN_TABS = ADMIN_GROUPS.flatMap(([, items]) => items);
 const TELECALLER_TABS = [['calling', 'Calling list']];
 
 function Login() {
@@ -125,24 +120,42 @@ function App() {
 
   return (
     <>
-      <header className="header">
-        <div className="brand">
-          <img src="/logo.png" alt="Congress party symbol" />
-          <div><b>{APP_NAME} · {me.role === 'admin' ? 'Command Dashboard' : 'Calling Panel'}</b>
-            <small>Delhi Pradesh Congress Committee · {me.role === 'admin' ? '250 MCD wards' : (me.districts || []).join(', ')}</small></div>
-        </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span className="pill"><span className="dot" />{me.name}{me.role === 'telecaller' ? ' · Telecaller' : ' · Admin'}</span>
-          <button className="btn ghost" style={{ minHeight: 34, padding: '6px 12px' }} onClick={() => supabase.auth.signOut()}>Log out</button>
-        </div>
-      </header>
-      {tabs.length > 1 && (
-        <nav className="nav" aria-label="Admin sections">
-          {tabs.map(([id, label]) => (
-            <button key={id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>
-          ))}
-        </nav>
+      <div className={'shell' + (me.role === 'admin' ? '' : ' solo')}>
+      {me.role === 'admin' && (
+        <aside className="sidebar" aria-label="Admin sections">
+          <div className="brand">
+            <img src="/logo.png" alt="Congress party symbol" />
+            <div><b>{APP_NAME}</b><small>Command Dashboard</small></div>
+          </div>
+          <nav>
+            {ADMIN_GROUPS.map(([group, items]) => (
+              <div key={group} className="navgroup">
+                <span>{group}</span>
+                {items.map(([id, label, Icon]) => (
+                  <button key={id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}><Icon size={17} strokeWidth={2} />{label}</button>
+                ))}
+              </div>
+            ))}
+          </nav>
+          <div className="who">
+            <span className="pill"><span className="dot" />{me.name}</span>
+            <button onClick={() => supabase.auth.signOut()}><LogOut size={15} />Log out</button>
+          </div>
+        </aside>
       )}
+      <div className="content">
+      <header className="topbar">
+        <div>
+          <h1>{me.role === 'admin' ? (ADMIN_TABS.find(([id]) => id === tab) || [])[1] : 'Calling Panel'}</h1>
+          <small>Delhi Pradesh Congress Committee · {me.role === 'admin' ? '250 MCD wards' : (me.districts || []).join(', ')}</small>
+        </div>
+        {me.role !== 'admin' && (
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <span className="pill light"><span className="dot" />{me.name} · Telecaller</span>
+            <button className="btn ghost" style={{ minHeight: 34, padding: '6px 12px' }} onClick={() => supabase.auth.signOut()}>Log out</button>
+          </div>
+        )}
+      </header>
       <main className="main">
         {tab === 'dashboard' && <Dashboard />}
         {tab === 'reports' && <Reports />}
@@ -160,6 +173,8 @@ function App() {
         {tab === 'settings' && <Settings />}
       </main>
       <Footer />
+      </div>
+      </div>
     </>
   );
 }
