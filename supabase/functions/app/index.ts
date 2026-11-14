@@ -62,8 +62,7 @@ function taskNotice(t: Record<string, any>) {
     const key = ["facebook", "instagram", "x", "whatsapp"].find((k) => t[`link_${k}`]) ?? "facebook";
     return { title: `नई पोस्ट: ${PLATFORM_LABEL[key]} पर शेयर करें`, body: desc ? `${t.title} · ${desc}`.slice(0, 240) : String(t.title) };
   }
-  const slots = Number(t.video_slots || 1);
-  return { title: `नया टास्क: ${t.title}`.slice(0, 120), body: desc ? desc.slice(0, 240) : `${slots} वीडियो अपलोड करें, आज रात 11:59 तक।` };
+  return { title: `नया टास्क: ${t.title}`.slice(0, 120), body: desc ? desc.slice(0, 240) : "2 फोटो और 2 वीडियो अपलोड करें, आज रात 11:59 तक।" };
 }
 
 const digits10 = (v: unknown) => {
@@ -76,16 +75,56 @@ const clean = (v: unknown, max = 120) => {
 };
 
 // Points. Keep in step with the member_stats view in schema.sql, which is the source of truth for totals.
-const POINTS = { share: 15, photo: 10, video: 20 };
+// 100 per share (per post and platform), 100 per task done in full, 100 per approved own task.
+const POINTS = { share: 100, task: 100, own_task: 100 };
+// Every task (and every own task) needs exactly this many uploads.
+const NEED = { video: 2, photo: 2 };
+
+// Delhi's 70 Vidhan Sabha seats, for the profile form.
+const ASSEMBLIES = ["Narela", "Burari", "Timarpur", "Adarsh Nagar", "Badli", "Rithala", "Bawana", "Mundka", "Kirari",
+  "Sultanpur Majra", "Nangloi Jat", "Mangol Puri", "Rohini", "Shalimar Bagh", "Shakur Basti", "Tri Nagar", "Wazirpur",
+  "Model Town", "Sadar Bazar", "Chandni Chowk", "Matia Mahal", "Ballimaran", "Karol Bagh", "Patel Nagar", "Moti Nagar",
+  "Madipur", "Rajouri Garden", "Hari Nagar", "Tilak Nagar", "Janakpuri", "Vikaspuri", "Uttam Nagar", "Dwarka", "Matiala",
+  "Najafgarh", "Bijwasan", "Palam", "Delhi Cantt", "Rajinder Nagar", "New Delhi", "Jangpura", "Kasturba Nagar",
+  "Malviya Nagar", "R K Puram", "Mehrauli", "Chhatarpur", "Deoli", "Ambedkar Nagar", "Sangam Vihar", "Greater Kailash",
+  "Kalkaji", "Tughlakabad", "Badarpur", "Okhla", "Trilokpuri", "Kondli", "Patparganj", "Laxmi Nagar", "Vishwas Nagar",
+  "Krishna Nagar", "Gandhi Nagar", "Shahdara", "Seemapuri", "Rohtas Nagar", "Seelampur", "Ghonda", "Babarpur",
+  "Gokalpur", "Mustafabad", "Karawal Nagar"].map((n, i) => `${i + 1} - ${n}`);
+
+const DOWNLOAD_URL = "https://github.com/aadiliftekhar143-cmd/inc-mcd-network/releases/latest/download/app-release.apk";
+
+/** Anonymous rank in ward, Vidhan Sabha, district and all Delhi (no names). Areas come from the admin's member list. */
+async function memberRanks(mobile: string) {
+  const { data: stats } = await db.from("member_stats").select("mobile, points").range(0, 9999);
+  const { data: rows } = await db.from("members").select("mobile, ward_no, assembly, district, zone").eq("active", true).range(0, 9999);
+  const pts = new Map((stats ?? []).map((x) => [x.mobile, Number(x.points || 0)]));
+  const me = (rows ?? []).find((m) => m.mobile === mobile);
+  if (!me) return null;
+  const rankIn = (pred: (m: any) => boolean) => {
+    const group = (rows ?? []).filter(pred);
+    const mine = pts.get(mobile) ?? 0;
+    return { rank: group.filter((m) => (pts.get(m.mobile) ?? 0) > mine).length + 1, total: group.length };
+  };
+  const dist = memberDistrict(me).toLowerCase();
+  const asm = String(me.assembly ?? "").trim().toLowerCase();
+  return {
+    ward: rankIn((m) => m.ward_no === me.ward_no),
+    assembly: asm ? rankIn((m) => String(m.assembly ?? "").trim().toLowerCase() === asm) : null,
+    district: dist ? rankIn((m) => memberDistrict(m).toLowerCase() === dist) : null,
+    delhi: rankIn(() => true),
+  };
+}
 
 async function memberStats(mobile: string) {
-  const { data } = await db.from("member_stats").select("points, tasks_done, videos, photos, shares").eq("mobile", mobile).maybeSingle();
+  const { data } = await db.from("member_stats").select("points, tasks_done, videos, photos, shares, full_tasks, own_tasks").eq("mobile", mobile).maybeSingle();
   return {
     points: Number(data?.points ?? 0),
     tasks_done: Number(data?.tasks_done ?? 0),
     videos: Number(data?.videos ?? 0),
     photos: Number(data?.photos ?? 0),
     shares: Number(data?.shares ?? 0),
+    full_tasks: Number(data?.full_tasks ?? 0),
+    own_tasks: Number(data?.own_tasks ?? 0),
   };
 }
 
@@ -123,16 +162,23 @@ Deno.serve(async (req) => {
   const action = body.action as string;
 
   try {
-    // ---- Login: registered mobile number only, no OTP ----
+    // ---- Login: registered mobile number only, no OTP. Leaders first, then ward members. ----
     if (action === "login") {
       const mobile = String(body.mobile ?? "").replace(/\D/g, "").slice(-10);
       if (!/^[6-9]\d{9}$/.test(mobile)) return json({ error: "invalid_mobile" }, 400);
+      const { data: ld } = await db.from("leaders").select("*").eq("mobile", mobile).eq("active", true).maybeSingle();
+      if (ld) {
+        const { data: ls, error: le } = await db.from("leader_sessions").insert({ mobile }).select("token").single();
+        if (le) throw le;
+        if (!ld.first_login_at) await db.from("leaders").update({ first_login_at: new Date().toISOString() }).eq("mobile", mobile);
+        return json({ token: ls.token, role: ld.role, leader: ld, member: { name: ld.name, mobile, ward_no: 0 } });
+      }
       const { data: m } = await db.from("members").select("*").eq("mobile", mobile).eq("active", true).maybeSingle();
       if (!m) return json({ error: "not_registered", helpline: (await settings()).helpline }, 404);
       const { data: s, error } = await db.from("sessions").insert({ mobile }).select("token").single();
       if (error) throw error;
       if (!m.first_login_at) await db.from("members").update({ first_login_at: new Date().toISOString() }).eq("mobile", mobile);
-      return json({ token: s.token, member: m });
+      return json({ token: s.token, role: "member", member: m });
     }
 
     const member = await memberFromSession(req.headers.get("x-session"));
@@ -166,7 +212,8 @@ Deno.serve(async (req) => {
       return json({
         member, today, date, days, tasks, leader, announcements,
         stats: await memberStats(mobile),
-        points_rule: { ...POINTS, task: 0 },
+        points_rule: { ...POINTS, need_video: NEED.video, need_photo: NEED.photo },
+        unread_inbox: (await db.from("inbox").select("id", { count: "exact", head: true }).eq("to_mobile", mobile).is("read_at", null)).count ?? 0,
         social: { facebook: s.social_facebook, x: s.social_x, instagram: s.social_instagram },
         dpcc_social: { facebook: s.dpcc_facebook, x: s.dpcc_x, instagram: s.dpcc_instagram },
         helpline: s.helpline,
@@ -174,7 +221,7 @@ Deno.serve(async (req) => {
         app_update: {
           version_code: Number(s.app_version_code || 1),
           version_name: s.app_version_name || "1.0",
-          download_url: s.app_download_url || "https://ward-sadasya.vercel.app/download.html",
+          download_url: s.app_download_url || DOWNLOAD_URL,
           notes: s.app_update_notes || "नया वर्शन उपलब्ध है।",
           mandatory: s.app_update_mandatory === "true",
         },
@@ -191,7 +238,7 @@ Deno.serve(async (req) => {
       if (t.task_date > istToday()) return json({ error: "not_open_yet" }, 400);
       const { count } = await db.from("media").select("id", { count: "exact", head: true })
         .eq("mobile", mobile).eq("task_id", taskId).eq("kind", kind);
-      const limit = kind === "video" ? t.video_slots : 10;
+      const limit = kind === "video" ? NEED.video : NEED.photo;
       if ((count ?? 0) >= limit) return json({ error: "limit_reached" }, 400);
 
       const s = await settings();
@@ -227,16 +274,16 @@ Deno.serve(async (req) => {
       const { data: media } = await db.from("media").select("kind").eq("mobile", mobile).eq("task_id", taskId);
       const videos = (media ?? []).filter((m) => m.kind === "video").length;
       const photos = (media ?? []).filter((m) => m.kind === "photo").length;
-      if (videos < 1) return json({ error: "need_video" }, 400);
+      if (videos < NEED.video || photos < NEED.photo) return json({ error: "need_more", videos, photos, need: NEED }, 400);
       const { data: before } = await db.from("completions").select("video_count, photo_count").eq("mobile", mobile).eq("task_id", taskId).maybeSingle();
       await db.from("completions").upsert({ mobile, task_id: taskId, video_count: videos, photo_count: photos, completed_at: new Date().toISOString() });
-      // Points come from uploads and shares; the tick itself earns nothing. Report what the uploads added since the last save are worth.
-      const earned = Math.max(0, videos - (before?.video_count ?? 0)) * POINTS.video
-        + Math.max(0, photos - (before?.photo_count ?? 0)) * POINTS.photo;
+      // 100 points the first time the task is complete in full (2 photos and 2 videos).
+      const wasFull = before && before.video_count >= NEED.video && before.photo_count >= NEED.photo;
+      const earned = wasFull ? 0 : POINTS.task;
       return json({ ok: true, earned, stats: await memberStats(mobile) });
     }
 
-    // ---- Share button tapped (X, Facebook, Instagram, WhatsApp): +15 points once per task and platform ----
+    // ---- Share button tapped (X, Facebook, Instagram, WhatsApp): +100 points once per task and platform ----
     if (action === "share") {
       const taskId = Number(body.task_id);
       const platform = String(body.platform ?? "").toLowerCase();
@@ -286,7 +333,7 @@ Deno.serve(async (req) => {
         },
         options: {
           wards: Array.from({ length: 250 }, (_, i) => ({ no: i + 1, name: wardNames.get(i + 1) ?? null })),
-          assemblies: uniq((rows ?? []).map((r) => r.assembly)),
+          assemblies: ASSEMBLIES,
           districts: uniq((rows ?? []).map((r) => r.district || r.zone)),
           lok_sabha: LOK_SABHA,
         },
@@ -307,6 +354,15 @@ Deno.serve(async (req) => {
     if (action === "profile_save") {
       const full_name = clean(body.full_name, 80);
       if (!full_name) return json({ error: "name_required" }, 400);
+      const isDate = (v: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(v ?? ""));
+      if (!isDate(body.dob)) return json({ error: "dob_required" }, 400);
+      if (!["male", "female", "other"].includes(String(body.gender))) return json({ error: "gender_required" }, 400);
+      if (typeof body.married !== "boolean") return json({ error: "married_required" }, 400);
+      if (body.married && !isDate(body.anniversary)) return json({ error: "anniversary_required" }, 400);
+      const link = (v: unknown) => {
+        const t = String(v ?? "").trim().slice(0, 300);
+        return t ? (/^https?:\/\//i.test(t) ? t : `https://${t}`) : null;
+      };
       const ward = Number(body.ward_no);
       const fam = body.family_members === "" || body.family_members == null ? null : Number(body.family_members);
       if (fam != null && (!Number.isInteger(fam) || fam < 0 || fam > 50)) return json({ error: "bad_family" }, 400);
@@ -322,6 +378,8 @@ Deno.serve(async (req) => {
         family_members: fam,
         contact_mobile: digits10(body.contact_mobile), alt_mobile: digits10(body.alt_mobile),
         photo_path: photo,
+        dob: body.dob, gender: body.gender, married: body.married, anniversary: body.married ? body.anniversary : null,
+        link_facebook: link(body.link_facebook), link_instagram: link(body.link_instagram), link_x: link(body.link_x),
         status: "pending", submitted_at: new Date().toISOString(),
       };
       // One open request per member: a new save replaces the one still waiting.
@@ -337,6 +395,74 @@ Deno.serve(async (req) => {
         : await db.from("profile_requests").insert(row).select("*").single();
       if (res.error) throw res.error;
       return json({ ok: true, request: res.data });
+    }
+
+    // ---- My rank (anonymous) ----
+    if (action === "ranks") return json({ ranks: await memberRanks(mobile), stats: await memberStats(mobile) });
+
+    // ---- Own tasks: work the member did on their own; 2 photos and 2 videos; 100 points once approved ----
+    if (action === "own_upload_url") {
+      const kind = body.kind === "photo" ? "photo" : body.kind === "audio" ? "audio" : "video";
+      const ext = String(body.ext ?? (kind === "video" ? "mp4" : kind === "audio" ? "m4a" : "jpg")).replace(/[^a-z0-9]/gi, "").slice(0, 5) || "bin";
+      if (body.size && Number(body.size) > 50 * 1024 * 1024) return json({ error: "file_too_large", max_mb: 50 }, 400);
+      const folder = body.purpose === "president" ? "to-president" : "own-tasks";
+      const path = `${folder}/${mobile}/${kind}-${Date.now()}.${ext}`;
+      const { data, error } = await db.storage.from("uploads").createSignedUploadUrl(path);
+      if (error) throw error;
+      return json({ path, signed_url: data.signedUrl });
+    }
+    if (action === "own_task_submit") {
+      const title = clean(body.title, 160);
+      if (!title) return json({ error: "title_required" }, 400);
+      const media = Array.isArray(body.media) ? body.media : [];
+      const ok = media.filter((m: any) => typeof m?.path === "string" && m.path.startsWith(`own-tasks/${mobile}/`));
+      const v = ok.filter((m: any) => m.kind === "video").length, ph = ok.filter((m: any) => m.kind === "photo").length;
+      if (v < NEED.video || ph < NEED.photo) return json({ error: "need_more", videos: v, photos: ph, need: NEED }, 400);
+      const { data, error } = await db.from("member_tasks").insert({
+        mobile, title, description: clean(body.description, 1000),
+        media: ok.map((m: any) => ({ kind: m.kind, path: m.path })),
+      }).select("*").single();
+      if (error) throw error;
+      return json({ ok: true, task: data });
+    }
+    if (action === "own_tasks") {
+      const { data } = await db.from("member_tasks").select("id, title, description, status, created_at, reviewed_at")
+        .eq("mobile", mobile).order("created_at", { ascending: false }).limit(50);
+      return json({ tasks: data ?? [] });
+    }
+
+    // ---- Message to the DPCC President (text and/or voice note) ----
+    if (action === "president_message") {
+      const text = clean(body.text, 2000);
+      const audio = clean(body.audio_path, 300);
+      if (audio && !audio.startsWith(`to-president/${mobile}/`)) return json({ error: "bad_path" }, 400);
+      const media = (Array.isArray(body.media) ? body.media : [])
+        .filter((m: any) => typeof m?.path === "string" && m.path.startsWith(`to-president/${mobile}/`))
+        .slice(0, 6).map((m: any) => ({ kind: m.kind === "video" ? "video" : "photo", path: m.path }));
+      if (!text && !audio && !media.length) return json({ error: "empty" }, 400);
+      await db.from("president_messages").insert({
+        mobile, sender_role: "member", sender_name: member.name, ward_no: member.ward_no,
+        assembly: member.assembly ?? null, district: memberDistrict(member) || null, text, audio_path: audio, media,
+      });
+      return json({ ok: true });
+    }
+
+    // ---- Posters and banners ----
+    if (action === "posters") {
+      const { data } = await db.from("posters").select("*").order("created_at", { ascending: false }).limit(100);
+      return json({ posters: (data ?? []).map((p) => ({ ...p, url: publicUrl("posters", p.path) })) });
+    }
+
+    // ---- Personal inbox (one way, from the DPCC President) ----
+    if (action === "inbox") {
+      const { data } = await db.from("inbox").select("*").eq("to_mobile", mobile).order("created_at", { ascending: false }).limit(100);
+      const items = await Promise.all((data ?? []).map(async (m) => {
+        let audio_url = null;
+        if (m.audio_path) audio_url = (await db.storage.from("uploads").createSignedUrl(m.audio_path, 3600)).data?.signedUrl ?? null;
+        return { ...m, audio_url };
+      }));
+      await db.from("inbox").update({ read_at: new Date().toISOString() }).eq("to_mobile", mobile).is("read_at", null);
+      return json({ messages: items });
     }
 
     // ---- Leader messages ----
@@ -373,9 +499,11 @@ Deno.serve(async (req) => {
         (!a.only_pending || pending > 0));
       const { data: msg } = await db.from("leader_messages").select("id, title, published_at")
         .gt("published_at", since).lte("published_at", new Date().toISOString()).order("published_at", { ascending: false }).limit(1);
+      const { data: newInbox } = await db.from("inbox").select("id, kind, text").eq("to_mobile", mobile).gt("created_at", since).limit(5);
       const s = await settings();
       return json({
         pending,
+        new_inbox: newInbox ?? [],
         total: tasks.filter((t) => t.kind === "upload").length,
         new_tasks: (newTasks ?? []).map((t) => ({ id: t.id, title: t.title, kind: t.kind, notify: taskNotice(t) })),
         announcements: mine,
@@ -385,7 +513,7 @@ Deno.serve(async (req) => {
         app_update: {
           version_code: Number(s.app_version_code || 1),
           version_name: s.app_version_name || "1.0",
-          download_url: s.app_download_url || "https://ward-sadasya.vercel.app/download.html",
+          download_url: s.app_download_url || DOWNLOAD_URL,
           notes: s.app_update_notes || "नया वर्शन उपलब्ध है।",
           mandatory: s.app_update_mandatory === "true",
         },

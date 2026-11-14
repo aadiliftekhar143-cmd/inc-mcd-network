@@ -128,6 +128,5 @@ export function taskNotice(t) {
     const p = PLATFORMS.find((x) => t[x.col]) || PLATFORMS[0];
     return { title: `नई पोस्ट: ${p.label} पर शेयर करें`, body: desc ? `${t.title} · ${desc}`.slice(0, 240) : t.title };
   }
-  const slots = Number(t.video_slots || 1);
-  return { title: `नया टास्क: ${t.title}`.slice(0, 120), body: desc ? desc.slice(0, 240) : `${slots} वीडियो अपलोड करें, आज रात 11:59 तक।` };
+  return { title: `नया टास्क: ${t.title}`.slice(0, 120), body: desc ? desc.slice(0, 240) : '2 फोटो और 2 वीडियो अपलोड करें, आज रात 11:59 तक।' };
 }

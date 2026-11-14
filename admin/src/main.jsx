@@ -13,6 +13,10 @@ import Reports from './Reports.jsx';
 import Team from './Team.jsx';
 import Settings from './Settings.jsx';
 import ProfileUpdates from './ProfileUpdates.jsx';
+import Leaders from './Leaders.jsx';
+import MemberTasks from './MemberTasks.jsx';
+import ToPresident from './ToPresident.jsx';
+import Posters from './Posters.jsx';
 
 const APP_NAME = 'INC MCD NETWORK';
 
@@ -24,6 +28,10 @@ const ADMIN_TABS = [
   ['members', 'Ward members'],
   ['messages', 'Leader messages'],
   ['reminders', 'Notifications'],
+  ['leaders', 'Leaders'],
+  ['membertasks', 'Member tasks'],
+  ['topresident', 'Messages to President'],
+  ['posters', 'Posters'],
   ['profiles', 'Profile updates'],
   ['team', 'Team'],
   ['settings', 'Settings'],
@@ -312,6 +320,10 @@ function App() {
         {tab === 'reminders' && <Reminders />}
         {tab === 'team' && <Team />}
         {tab === 'profiles' && <ProfileUpdates />}
+        {tab === 'leaders' && <Leaders />}
+        {tab === 'membertasks' && <MemberTasks />}
+        {tab === 'topresident' && <ToPresident />}
+        {tab === 'posters' && <Posters />}
         {tab === 'settings' && <Settings />}
       </main>
       <Footer />
