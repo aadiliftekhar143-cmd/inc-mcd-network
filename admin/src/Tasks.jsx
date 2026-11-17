@@ -54,11 +54,18 @@ export default function Tasks() {
     row.type_label = row.type_label || null; row.audience = row.audience || 'all';
     const isNew = !row.id;
     if (isNew) delete row.id;
-    const { data: saved, error } = isNew
-      ? await supabase.from('tasks').insert(row).select('id').single()
-      : await supabase.from('tasks').update(row).eq('id', row.id).select('id').single();
-    if (error) { setMsg(error.message); return; }
+    const write = (r) => (isNew
+      ? supabase.from('tasks').insert(r).select('id').single()
+      : supabase.from('tasks').update(r).eq('id', r.id).select('id').single());
+    let { data: saved, error } = await write(row);
     let note = 'Task saved.';
+    // The database may not have the newer columns yet (schema.sql not run after an update). Save the task anyway.
+    if (error && /audience|type_label|schema cache/i.test(error.message)) {
+      const { audience, type_label, ...basic } = row;
+      ({ data: saved, error } = await write(basic));
+      if (!error) note = 'Task saved for everyone. Task types and "For" need the database update (schema.sql) before they work.';
+    }
+    if (error) { setMsg(error.message); return; }
     if (isNew && notify && row.task_date === istToday()) {
       const notice = taskNotice(row);
       const { data, error: pe } = await callFn('push', {

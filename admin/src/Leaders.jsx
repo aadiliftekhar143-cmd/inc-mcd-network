@@ -202,7 +202,8 @@ function LeaderTasks() {
     setTasks(await fetchAll('leader_tasks', '*', (q) => q.order('created_at', { ascending: false })));
     setDone(await fetchAll('leader_task_done', 'task_id, mobile'));
     setLeaders(await fetchAll('leaders', 'mobile, name, role, district, assembly', (q) => q.eq('active', true)));
-    setPeople(await fetchAll('members', 'mobile, district, zone, assembly, block_no, is_applicant', (q) => q.eq('active', true)));
+    // Older databases have no block columns yet: the leader tasks must still load.
+    setPeople(await fetchAll('members', 'mobile, district, zone, assembly, block_no, is_applicant', (q) => q.eq('active', true)).catch(() => []));
   };
   useEffect(() => { load(); }, []);
   const districts = [...new Set([...leaders.map((l) => l.district), ...people.map(districtOf)].filter(Boolean))].sort();
