@@ -19,7 +19,8 @@ const withPreset = (f) => {
 };
 const EMPTY = { audience: 'all', type_label: '', platform: 'facebook', task_date: istToday(), sort: 1, kind: 'upload', title: '', description: '', video_slots: 2, allow_photos: true, link_x: '', link_instagram: '', link_facebook: '', link_whatsapp: '' };
 const AUDIENCES = [['all', 'Ward members and Block Presidents'], ['member', 'Only ward members'], ['block', 'Only Block Presidents']];
-const TASK_COLUMNS = ['audience', 'type_label', 'id', 'task_date', 'sort', 'kind', 'title', 'description', 'video_slots', 'allow_photos', 'link_x', 'link_instagram', 'link_facebook', 'link_whatsapp'];
+const KIND_NAME = { upload: 'Task', share: 'Share card', choice: 'Multiple choice', text: 'Another option' };
+const TASK_COLUMNS = ['options', 'until_date', 'audience', 'type_label', 'id', 'task_date', 'sort', 'kind', 'title', 'description', 'video_slots', 'allow_photos', 'link_x', 'link_instagram', 'link_facebook', 'link_whatsapp'];
 
 export default function Tasks() {
   const [tasks, setTasks] = useState([]);
@@ -29,6 +30,7 @@ export default function Tasks() {
   const [types, setTypes] = useState([]);        // custom task types: { id, label, base }
   const [newType, setNewType] = useState(null);  // { label, base } while adding one
   const [date, setDate] = useState(istToday());  // '' = all dates
+  const [replies, setReplies] = useState(null);  // the task whose replies are open
 
   const load = async () => {
     const { data } = await supabase.from('tasks').select('*').order('task_date').order('sort');
@@ -50,6 +52,10 @@ export default function Tasks() {
     // A share card is for one platform: keep only that platform's link.
     for (const p of PLATFORMS) if (row.kind !== 'share' || p.key !== form.platform) row[p.col] = null;
     if (row.kind === 'share' && !row[PLATFORMS.find((p) => p.key === form.platform).col]) { setMsg('Add the post link for the chosen platform.'); return; }
+    // Multiple choice: one choice per line in the box becomes the list people tick from.
+    row.options = row.kind === 'choice' ? String(form.optionsText ?? (form.options || []).join('\n')).split('\n').map((x) => x.trim()).filter(Boolean) : [];
+    if (row.kind === 'choice' && row.options.length < 2) { setMsg('Write at least two choices, one on each line.'); return; }
+    row.until_date = row.until_date || null;
     if (!row.description) row.description = null;
     row.type_label = row.type_label || null; row.audience = row.audience || 'all';
     const isNew = !row.id;
@@ -60,8 +66,8 @@ export default function Tasks() {
     let { data: saved, error } = await write(row);
     let note = 'Task saved.';
     // The database may not have the newer columns yet (schema.sql not run after an update). Save the task anyway.
-    if (error && /audience|type_label|schema cache/i.test(error.message)) {
-      const { audience, type_label, ...basic } = row;
+    if (error && /audience|type_label|options|until_date|kind_check|schema cache/i.test(error.message) && ['upload', 'share'].includes(row.kind)) {
+      const { audience, type_label, options, until_date, ...basic } = row;
       ({ data: saved, error } = await write(basic));
       if (!error) note = 'Task saved for everyone. Task types and "For" need the database update (schema.sql) before they work.';
     }
@@ -128,6 +134,8 @@ export default function Tasks() {
                 <select value={typeValue(form)} onChange={(e) => pickType(e.target.value)}>
                   <option value="upload">Task with video upload</option>
                   <option value="share">Share card (watch and reshare)</option>
+                  <option value="choice">Multiple choice (tick and submit)</option>
+                  <option value="text">Another option (write or record, then submit)</option>
                   {types.map((t) => <option key={t.label} value={'c:' + t.label}>{t.label}</option>)}
                   <option value="+">+ Add a new type…</option>
                 </select>
@@ -139,6 +147,15 @@ export default function Tasks() {
               </label>
               {form.kind === 'upload' && (
                 <label>Uploads needed<input value="2 photos + 2 videos (100 points)" disabled /></label>
+              )}
+              {form.kind === 'choice' && (
+                <label>To finish<input value="Tick what was done and submit (100 points)" disabled /></label>
+              )}
+              {form.kind === 'text' && (
+                <label>To finish<input value="Write a remark or record a voice note (100 points)" disabled /></label>
+              )}
+              {(form.kind === 'choice' || form.kind === 'text') && (
+                <label>Stays on the list until (optional)<input type="date" min={form.task_date} value={form.until_date || ''} onChange={set('until_date')} /></label>
               )}
               {form.kind === 'share' && (
                 <label>Platform
@@ -155,6 +172,8 @@ export default function Tasks() {
                 <select value={newType.base} onChange={(e) => setNewType({ ...newType, base: e.target.value })}>
                   <option value="upload">Works like an upload task (2 photos + 2 videos)</option>
                   <option value="share">Works like a share card (post link)</option>
+                  <option value="choice">Works like multiple choice (tick and submit)</option>
+                  <option value="text">Another option (write or record, then submit)</option>
                 </select>
                 <button type="button" className="btn sm" onClick={addType}>Add type</button>
                 <button type="button" className="btn ghost sm" onClick={() => setNewType(null)}>Cancel</button>
@@ -184,6 +203,11 @@ export default function Tasks() {
                   : <input type="text" value={form.title} onChange={set('title')} required placeholder="3 स्थानीय लोगों से वायु प्रदूषण पर बात करें, बाइट रिकॉर्ड करें" />}
               </label>
               <label>Details (optional)<textarea rows="3" value={form.description || ''} onChange={set('description')} /></label>
+              {form.kind === 'choice' && (
+                <label>Choices <span className="muted" style={{ fontSize: 12 }}>One on each line. The title above is the heading; people tick the ones they did and submit.</span>
+                  <textarea className="big" rows="5" value={form.optionsText ?? (form.options || []).join('\n')} onChange={set('optionsText')} placeholder={'घर घर संपर्क किया\nबूथ बैठक की\nपर्चे बाँटे\nनए सदस्य जोड़े'} />
+                </label>
+              )}
             </div>
             {!form.id && form.task_date === istToday() && (
               <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, marginTop: 10 }}>
@@ -212,15 +236,15 @@ export default function Tasks() {
           <h2>{dayLabel(d)} {d === istToday() && <span className="tag live" style={{ marginLeft: 6 }}>Today</span>}</h2>
           <div className="tbl">
             <table>
-              <thead><tr><th>#</th><th>Type</th><th>Title</th><th>For</th><th>Uploads</th><th /></tr></thead>
+              <thead><tr><th>#</th><th>Type</th><th>Title</th><th>For</th><th>Uploads / replies</th><th /></tr></thead>
               <tbody>
                 {tasks.filter((t) => t.task_date === d).map((t) => (
                   <tr key={t.id}>
                     <td>{t.sort}</td>
-                    <td><span className={'tag ' + (t.kind === 'upload' ? 'live' : 'mute')} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>{t.kind === 'upload' ? (t.type_label || 'Task') : <>{React.createElement(PLATFORM_ICON[platformOf(t)], { size: 12 })}{t.type_label || 'Share card'}</>}</span></td>
+                    <td><span className={'tag ' + (t.kind === 'upload' ? 'live' : 'mute')} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>{t.kind === 'share' ? <>{React.createElement(PLATFORM_ICON[platformOf(t)], { size: 12 })}{t.type_label || 'Share card'}</> : (t.type_label || KIND_NAME[t.kind] || 'Task')}</span>{t.from_president && <div className="muted" style={{ fontSize: 11.5, marginTop: 3 }}>From the leaders' side{t.created_by ? ' · ' + t.created_by : ''}</div>}</td>
                     <td><b>{t.title}</b>{t.description && <div className="muted" style={{ fontSize: 12 }}>{t.description}</div>}</td>
-                    <td className="muted" style={{ fontSize: 12.5 }}>{t.audience === 'block' ? 'Block Presidents' : t.audience === 'member' ? 'Ward members' : 'Everyone'}</td>
-                    <td>{t.kind === 'upload' ? '2 + 2' : '–'}</td>
+                    <td className="muted" style={{ fontSize: 12.5 }}>{t.audience === 'block' ? 'Block Presidents' : t.audience === 'member' ? 'Ward members' : 'Everyone'}{t.target_district ? ' · ' + t.target_district : ''}{t.until_date ? <div>until {dayLabel(t.until_date)}</div> : null}</td>
+                    <td>{t.kind === 'upload' ? '2 + 2' : t.kind === 'choice' || t.kind === 'text' ? <button className="btn ghost sm" onClick={() => setReplies(t)}>Replies</button> : '–'}</td>
                     <td style={{ whiteSpace: 'nowrap' }}>
                       <button className="btn ghost" style={{ minHeight: 32, padding: '4px 10px', fontSize: 12 }} onClick={() => setForm({ ...t, platform: platformOf(t), type_label: t.type_label || '', audience: t.audience || 'all' })}>Edit</button>{' '}
                       <button className="btn warn" style={{ minHeight: 32, padding: '4px 10px', fontSize: 12 }} onClick={() => remove(t)}>Delete</button>
@@ -232,8 +256,61 @@ export default function Tasks() {
           </div>
         </section>
       ))}
+      {replies && <TaskReplies task={replies} onClose={() => setReplies(null)} />}
       {dates.length > 0 && date && !dates.includes(date) && <p className="muted">No task on {dayLabel(date)}. Pick another date or press All dates.</p>}
       {!dates.length && <p className="muted">No tasks yet. Add the first one with + New task.</p>}
     </>
+  );
+}
+
+/** What people sent for a multiple choice or written task: a count for each choice, then every reply. */
+function TaskReplies({ task, onClose }) {
+  const [rows, setRows] = useState(null);
+  const [names, setNames] = useState({});
+  const [files, setFiles] = useState({});
+  useEffect(() => { (async () => {
+    const { data } = await supabase.from('task_responses').select('*').eq('task_id', task.id).order('created_at', { ascending: false }).range(0, 4999);
+    const list = data || [];
+    const who = {};
+    const mobiles = [...new Set(list.map((x) => x.mobile))];
+    for (let i = 0; i < mobiles.length; i += 300) {
+      const { data: ms } = await supabase.from('members').select('mobile, name, ward_no').in('mobile', mobiles.slice(i, i + 300));
+      (ms || []).forEach((m) => { who[m.mobile] = m; });
+    }
+    const paths = list.map((x) => x.audio_path).filter(Boolean).slice(0, 200);
+    if (paths.length) {
+      const { data: signed } = await supabase.storage.from('uploads').createSignedUrls(paths, 3600);
+      setFiles(Object.fromEntries((signed || []).filter((d) => d.signedUrl).map((d) => [d.path, d.signedUrl])));
+    }
+    setNames(who); setRows(list);
+  })(); }, [task.id]);
+  const options = task.options || [];
+  const count = (o) => (rows || []).filter((x) => (x.choices || []).includes(o)).length;
+  const top = Math.max(1, ...options.map(count));
+  return (
+    <div className="modal" role="dialog" aria-modal="true" aria-label="Replies" onClick={onClose}>
+      <div className="card" style={{ maxWidth: 760, maxHeight: '86vh', overflow: 'auto' }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
+          <div><h2>{task.title}</h2><p className="sub">{rows ? `${rows.length} people have replied` : 'Loading…'}</p></div>
+          <button className="btn ghost sm" onClick={onClose}>Close</button>
+        </div>
+        {rows && options.map((o) => (
+          <div key={o} style={{ display: 'grid', gridTemplateColumns: 'minmax(140px,260px) 1fr 44px', gap: 8, alignItems: 'center', fontSize: 13.5, margin: '6px 0' }}>
+            <span>{o}</span><div style={{ background: '#EEF0F4', borderRadius: 6, height: 10 }}><div style={{ width: `${(count(o) / top) * 100}%`, background: '#1B4FA8', height: 10, borderRadius: 6 }} /></div><b>{count(o)}</b>
+          </div>))}
+        {rows && rows.length > 0 && (
+          <div className="tbl" style={{ marginTop: 12 }}><table>
+            <thead><tr><th>Who</th>{options.length > 0 && <th>Ticked</th>}<th>Remark</th><th>Voice note</th></tr></thead>
+            <tbody>{rows.map((x) => (
+              <tr key={x.mobile}>
+                <td><b>{names[x.mobile]?.name || x.mobile}</b><div className="muted" style={{ fontSize: 12 }}>{names[x.mobile]?.ward_no ? 'Ward ' + names[x.mobile].ward_no + ' · ' : ''}{x.mobile}</div></td>
+                {options.length > 0 && <td>{(x.choices || []).join(', ')}</td>}
+                <td style={{ maxWidth: 320 }}>{x.note || ''}</td>
+                <td>{x.audio_path && files[x.audio_path] ? <audio controls src={files[x.audio_path]} style={{ width: 200 }} /> : ''}</td>
+              </tr>))}</tbody>
+          </table></div>)}
+        {rows && !rows.length && <p className="muted">Nobody has replied yet.</p>}
+      </div>
+    </div>
   );
 }

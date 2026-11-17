@@ -1,6 +1,6 @@
 # Google Play: what to fill in for INC MCD NETWORK
 
-Everything below goes in Play Console under **Policy and programs > App content**. The answers match what the app (v2.2) really does. If the app changes what it collects, change these answers too.
+Everything below goes in Play Console under **Policy and programs > App content**. The answers match what the app (v2.3) really does. If the app changes what it collects, change these answers too.
 
 ## Links to paste
 
@@ -9,7 +9,7 @@ Everything below goes in Play Console under **Policy and programs > App content*
 | Privacy policy | https://congressdelhinetwork.com/privacy |
 | Account deletion (Data safety form asks for this) | https://congressdelhinetwork.com/delete-account |
 
-The app reaches the same page from inside: Menu > Privacy Policy (bottom of the menu) > Delete my account. There is no separate delete button in the app; if Google review asks for one, it can be added back. Requests land in the admin panel under **People > Account deletion**. Google's rule is that the request must be acted on, so check that tab regularly.
+The app links to the same page from inside: "Request for Account Deletion" at the bottom of the menu and on the login screen. Requests land in the admin panel under **People > Account deletion**. Google's rule is that the request must be acted on, so check that tab regularly.
 
 ## Data safety form
 
@@ -24,8 +24,6 @@ Data types to tick. For every one: **Collected: yes. Shared with third parties: 
 | Personal info | Name | Required | App functionality, Account management |
 | Personal info | Phone number | Required | App functionality, Account management |
 | Personal info | Other info (date of birth, gender, marital status and anniversary, family size, party post, ward and area, links to own social media accounts) | Optional (the user fills the profile) | App functionality |
-| Location | Approximate location | Optional (only Assembly Observers, only when a visit report is sent) | App functionality |
-| Location | Precise location | Optional (same as above) | App functionality |
 | Photos and videos | Photos | Optional | App functionality |
 | Photos and videos | Videos | Optional | App functionality |
 | Audio files | Voice or sound recordings | Optional | App functionality |
@@ -34,7 +32,7 @@ Data types to tick. For every one: **Collected: yes. Shared with third parties: 
 | App info and performance | none | | |
 | Device or other IDs | Device or other IDs (Firebase notification token) | Required | App functionality |
 
-Do **not** tick: financial info, health and fitness, emails or SMS, contacts, calendar, web browsing, files and docs, installed apps.
+Do **not** tick: location (the app no longer collects it, from v2.3), financial info, health and fitness, emails or SMS, contacts, calendar, web browsing, files and docs, installed apps.
 
 Notes for whoever fills it:
 
@@ -69,13 +67,12 @@ Two things to keep in mind:
 |---|---|
 | Notifications | Task reminders and messages |
 | Microphone | Recording a voice note, only when the record button is pressed |
-| Location (approximate and precise) | Attached to an Assembly Observer's visit report, only when the report is sent. Not collected in the background |
 | Storage (Android 9 and below only) | Saving a poster the user chose to download |
 
 Camera and gallery are opened through Android's own picker, so no camera or media permission is requested.
 
 ## Before submitting
 
-1. In admin **Settings**, set the app version code to 13 and the version name to 2.2, so older installs are told to update.
+1. In admin **Settings**, set the app version code to 14 and the version name to 2.3, so older installs are told to update.
 2. Play needs a signed app bundle (.aab). The build workflow now makes one next to the APK; it is in the GitHub release.
 3. Organisation accounts are needed for some app types. If the Play account is a personal one and Google objects, the fix is an organisation account in the name of Coceptual Media or DPCC.

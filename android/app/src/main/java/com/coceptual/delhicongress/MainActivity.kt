@@ -484,6 +484,80 @@ internal fun LoginScreen(onDone: () -> Unit) {
                     Text("दूसरा नंबर डालें", color = Muted, fontSize = 14.sp)
                 }
             }
+            PolicyLinks(Modifier.fillMaxWidth().padding(top = 18.dp), center = true)
+        }
+    }
+}
+
+/**
+ * A task that is finished by replying: tick what was done from a list ("choice"), or write a remark or record a voice note ("text").
+ * Sending the reply completes the task and gives the 100 points.
+ */
+@Composable
+internal fun ReplyTaskCard(t: JSONObject, onDone: () -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val id = t.optLong("id")
+    val choice = t.optString("kind") == "choice"
+    val done = t.optBoolean("done")
+    val options = remember(id) { t.optJSONArray("options")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList() }
+    val sent = t.optJSONObject("response")
+    val picked = remember(id) { mutableStateListOf<String>() }
+    var note by remember(id) { mutableStateOf("") }
+    var voice by remember(id) { mutableStateOf<File?>(null) }
+    var sending by remember { mutableStateOf(false) }
+    CardBox {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (t.optBoolean("from_president")) PresidentTaskLine()
+            Row(verticalAlignment = Alignment.Top) {
+                Text(t.optString("title"), fontSize = 16.sp, lineHeight = 23.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.weight(1f).padding(end = 8.dp))
+                Text(if (done) "पूरा हुआ · $PTS_TASK अंक" else "$PTS_TASK अंक", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (done) GreenText else OrangeText,
+                    modifier = Modifier.clip(RoundedCornerShape(50)).background(if (done) GreenBg else OrangeBg).padding(horizontal = 10.dp, vertical = 4.dp))
+            }
+            t.str("description")?.let { Text(it, fontSize = 14.sp, color = Color(0xFF3A4560), lineHeight = 21.sp) }
+            t.str("until_date")?.let { if (!done) Text("आख़िरी तारीख़: ${hiDate(it)}", fontSize = 12.5.sp, color = Muted) }
+            t.str("audio_url")?.let { AudioPlayer(it) }
+            if (done) {
+                val ticked = sent?.optJSONArray("choices")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
+                ticked.forEach { c ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.CheckCircle, null, tint = Green, modifier = Modifier.size(18.dp)); Text("  $c", fontSize = 14.sp, color = Ink)
+                    }
+                }
+                sent?.str("note")?.let { Text("आपने लिखा: $it", fontSize = 13.5.sp, color = Muted, lineHeight = 20.sp) }
+            } else {
+                if (choice) {
+                    Text("जो काम किए उन पर टिक करें, फिर सबमिट करें।", fontSize = 13.sp, color = Muted)
+                    options.forEach { o ->
+                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { if (o in picked) picked.remove(o) else picked.add(o) }, verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = o in picked, onCheckedChange = { if (it) picked.add(o) else picked.remove(o) }, colors = CheckboxDefaults.colors(checkedColor = Navy))
+                            Text(o, fontSize = 14.5.sp, color = Ink)
+                        }
+                    }
+                }
+                OutlinedTextField(note, { note = it.take(2000) }, label = { Text(if (choice) "कुछ और बताना हो तो लिखें" else "क्या किया, यहाँ लिखें") },
+                    minLines = if (choice) 2 else 3, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+                if (!choice) VoiceNote(voice) { voice = it }
+                val guard = rememberSendGuard()
+                Button(
+                    onClick = { guard {
+                        if (choice && picked.isEmpty()) { Toast.makeText(ctx, "कम से कम एक पर टिक करें", Toast.LENGTH_SHORT).show(); return@guard }
+                        if (!choice && note.isBlank() && voice == null) { Toast.makeText(ctx, "दो लाइन लिखें या वॉइस नोट रिकॉर्ड करें", Toast.LENGTH_SHORT).show(); return@guard }
+                        sending = true
+                        scope.launch {
+                            try {
+                                val p = JSONObject().put("task_id", id).put("choices", JSONArray(picked.toList())).put("note", note.trim())
+                                voice?.let { p.put("audio_path", uploadFile(ctx, false, it, "audio", "audio/mp4")) }
+                                Api.call(ctx, "task_respond", p)
+                                Toast.makeText(ctx, "टास्क पूरा हुआ। $PTS_TASK अंक जुड़ गए।", Toast.LENGTH_LONG).show()
+                                onDone()
+                            } catch (e: Exception) { Toast.makeText(ctx, "भेजा नहीं जा सका, इंटरनेट चेक करें", Toast.LENGTH_LONG).show() }
+                            sending = false
+                        }
+                    } },
+                    enabled = !sending, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Navy),
+                ) { Text(if (sending) "भेजा जा रहा है…" else "सबमिट करें", fontWeight = FontWeight.Bold) }
+            }
         }
     }
 }
@@ -713,6 +787,8 @@ internal fun HomeScreen(
     val allTasks = remember(d) { d.optJSONArray("tasks")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } } ?: emptyList() }
     val uploadTasks = remember(allTasks) { allTasks.filter { it.optString("kind") == "upload" } }
     val shareTasks = remember(allTasks) { allTasks.filter { it.optString("kind") == "share" } }
+    // Checklist and written tasks are answered right on the home screen.
+    val replyTasks = remember(allTasks) { allTasks.filter { it.optString("kind") == "choice" || it.optString("kind") == "text" } }
     val doneCount = uploadTasks.count { it.optBoolean("done") }
     val today = d.optString("today")
     val selected = d.optString("date")
@@ -923,7 +999,7 @@ internal fun HomeScreen(
 
             // The day's work. A day with only posts to share is named for what it is.
             val dayName = if (selected == today || selected.isBlank()) "आज" else hiDate(selected).substringBeforeLast(' ')
-            val shareOnly = uploadTasks.isEmpty() && shareTasks.isNotEmpty()
+            val shareOnly = uploadTasks.isEmpty() && replyTasks.isEmpty() && shareTasks.isNotEmpty()
             item(key = "daytitle") {
                 Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 28.dp)) {
                     Text(if (shareOnly) "$dayName के टास्क: सोशल मीडिया शेयर" else "$dayName के टास्क", fontSize = 21.sp, lineHeight = 28.sp, fontWeight = FontWeight.ExtraBold, color = Navy)
@@ -939,10 +1015,15 @@ internal fun HomeScreen(
                 }
             }
 
+            // Checklist and written tasks (also the ones that came through the President)
+            items(replyTasks, key = { "reply" + it.optLong("id") }) { t ->
+                Box(Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp)) { ReplyTaskCard(t) { reload++ } }
+            }
+
             // Upload tasks for the selected day
-            if (!shareOnly) item(key = "tasks") {
-                Column(Modifier.padding(start = 16.dp, end = 16.dp, top = if (shareTasks.isNotEmpty()) 24.dp else 14.dp)) {
-                    if (shareTasks.isNotEmpty()) SectionTitle("फ़ील्ड टास्क")
+            if (!shareOnly && (uploadTasks.isNotEmpty() || replyTasks.isEmpty())) item(key = "tasks") {
+                Column(Modifier.padding(start = 16.dp, end = 16.dp, top = if (shareTasks.isNotEmpty() || replyTasks.isNotEmpty()) 24.dp else 14.dp)) {
+                    if (shareTasks.isNotEmpty() || replyTasks.isNotEmpty()) SectionTitle("फ़ील्ड टास्क")
                     CardBox {
                         if (uploadTasks.isEmpty()) {
                             Text("इस दिन के लिए अभी कोई टास्क नहीं है।", color = Muted, fontSize = 14.sp, textAlign = TextAlign.Center,
