@@ -606,6 +606,8 @@ private fun GsHome(lc: LeaderCtx) {
     var key by remember { mutableIntStateOf(0) }
     LaunchedEffect(key) { mine = try { Api.leader(ctx, "tasks").optJSONArray("mine").list() } catch (e: Exception) { emptyList() } }
     val due = mine.orEmpty().filter { !it.optBoolean("done") }
+    var finishing by remember { mutableStateOf<JSONObject?>(null) }
+    finishing?.let { t -> TaskDoneDialog(t.optLong("id"), t.optString("title"), onDismiss = { finishing = null }) { finishing = null; key++; lc.reload() } }
     LCard("अध्यक्ष जी के दिए टास्क", action = { Text(if (mine == null) "" else "${due.size} बाकी", fontSize = 12.sp, color = Muted) }) {
         if (due.isNotEmpty()) PresidentTaskLine()
         if (mine == null) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
@@ -616,8 +618,7 @@ private fun GsHome(lc: LeaderCtx) {
                 t.str("due_date")?.let { Text("आख़िरी तारीख़ ${hiDate(it)}", fontSize = 12.sp, color = Muted) }
                 t.str("description")?.let { Text(it, fontSize = 13.sp, color = Color(0xFF3A4560)) }
                 t.str("audio_url")?.let { AudioPlayer(it) }
-                OutlinedButton(onClick = { scope.launch { try { Api.leader(ctx, "task_done", JSONObject().put("task_id", t.optLong("id"))); key++ } catch (_: Exception) {} } },
-                    shape = RoundedCornerShape(10.dp)) { Icon(Icons.Filled.Check, null, modifier = Modifier.size(16.dp)); Text(" हो गया") }
+                OutlinedButton(onClick = { finishing = t }, shape = RoundedCornerShape(10.dp)) { Icon(Icons.Filled.Check, null, modifier = Modifier.size(16.dp)); Text(" काम हो गया") }
             }
         }
     }
@@ -995,6 +996,9 @@ private fun MyTasksTab(lc: LeaderCtx) {
     val mine = d.optJSONArray("mine").list()
     val due = mine.filter { !it.optBoolean("done") }; val done = mine.filter { it.optBoolean("done") }
     Kpis(listOf("${due.size}" to "बाकी टास्क", "${done.size}" to "पूरे हुए"))
+    var finishing by remember { mutableStateOf<JSONObject?>(null) }
+    finishing?.let { t -> TaskDoneDialog(t.optLong("id"), t.optString("title"), onDismiss = { finishing = null }) { finishing = null; key++ } }
+    TaskCounts(lc)
     LCard("बाकी टास्क") {
         if (due.isEmpty()) Text("सब टास्क पूरे हैं।", color = Muted, fontSize = 13.sp) else PresidentTaskLine()
         due.forEach { t ->
@@ -1005,9 +1009,7 @@ private fun MyTasksTab(lc: LeaderCtx) {
                 t.str("audio_url")?.let { AudioPlayer(it) }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (lc.role == "observer") Button(onClick = { lc.open(Page("report_new", t.optLong("id").toString())) }, shape = RoundedCornerShape(10.dp), colors = ButtonDefaults.buttonColors(containerColor = Navy)) { Text("रिपोर्ट भेजें") }
-                    OutlinedButton(onClick = {
-                        scope.launch { try { Api.leader(ctx, "task_done", JSONObject().put("task_id", t.optLong("id"))); key++ } catch (_: Exception) {} }
-                    }, shape = RoundedCornerShape(10.dp)) { Icon(Icons.Filled.Check, null, modifier = Modifier.size(16.dp)); Text(" हो गया") }
+                    OutlinedButton(onClick = { finishing = t }, shape = RoundedCornerShape(10.dp)) { Icon(Icons.Filled.Check, null, modifier = Modifier.size(16.dp)); Text(" काम हो गया") }
                 }
                 HorizontalDivider(color = Color(0xFFF0F2F6))
             }
@@ -1023,7 +1025,7 @@ private fun MyTasksTab(lc: LeaderCtx) {
     if (created.isNotEmpty()) LCard("मेरे बनाए टास्क") {
         created.forEach { t ->
             RowItem(t.optString("title"), LEVEL_HI[t.optString("level")] ?: "") {
-                Chip(when (t.optString("status")) { "active" -> "भेजा गया"; "pending" -> "अध्यक्ष जी की मंज़ूरी बाकी"; "suggested" -> "सुझाव भेजा"; else -> "नहीं भेजा" }, Ground, Ink)
+                Chip(when (t.optString("status")) { "active", "moved" -> "भेजा गया"; "pending" -> "अध्यक्ष जी की मंज़ूरी बाकी"; "suggested" -> "सुझाव भेजा"; else -> "नहीं भेजा" }, Ground, Ink)
             }
         }
     }
@@ -1222,12 +1224,13 @@ private fun TasksReportPage(lc: LeaderCtx) {
     LaunchedEffect(key) { data = try { Api.leader(ctx, "tasks") } catch (e: Exception) { JSONObject() } }
     val d = data ?: run { CircularProgressIndicator(color = Orange); return }
     val pending = d.optJSONArray("pending").list()
-    if (lc.role == "president" && pending.isNotEmpty()) LCard("महासचिव के बनाए टास्क: आपकी मंज़ूरी चाहिए") {
-        Text("मंज़ूर करने पर ये आपकी तरफ से जाएंगे।", fontSize = 12.sp, color = Muted)
+    if (lc.role == "president" && pending.isNotEmpty()) LCard("आपकी मंज़ूरी चाहिए", action = { Text("${pending.size}", fontSize = 12.5.sp, color = Muted, fontWeight = FontWeight.Bold) }) {
+        Text("महासचिव, ज़िला अध्यक्ष और ऑब्ज़र्वर के बनाए टास्क और सुझाव। मंज़ूर करने पर ये आपकी तरफ़ से जाएंगे। वार्ड सदस्य और ब्लॉक अध्यक्ष के टास्क उनके रोज़ के टास्क में जुड़ेंगे और 100 अंक के होंगे।", fontSize = 12.5.sp, color = Muted, lineHeight = 18.sp)
         pending.forEach { t ->
             Column(Modifier.padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(t.optString("title"), fontWeight = FontWeight.Bold)
-                Text("${LEVEL_HI[t.optString("level")]}${t.str("target_district")?.let { " · $it" } ?: ""}", fontSize = 12.sp, color = Muted)
+                Text((if (t.optString("status") == "suggested") "सुझाव" else "टास्क") + " · ${ROLE_HI[t.optString("created_by")] ?: ""}${t.str("by_name")?.let { " $it" } ?: ""} की तरफ़ से", fontSize = 12.5.sp, color = OrangeText, fontWeight = FontWeight.SemiBold)
+                Text("किसके लिए: ${LEVEL_HI[t.optString("level")]}${t.str("target_district")?.let { " · $it" } ?: ""}${t.str("target_assembly")?.let { " · $it" } ?: ""}", fontSize = 12.sp, color = Muted)
                 t.str("description")?.let { Text(it, fontSize = 13.sp) }
                 t.str("audio_url")?.let { AudioPlayer(it) }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1387,8 +1390,8 @@ private fun TaskCreatePage(lc: LeaderCtx, suggest: Boolean, onBack: () -> Unit) 
                     if (district.isNotBlank()) p.put("target_district", district)
                     if (suggest) p.put("suggest", true)
                     voice?.let { p.put("audio_path", uploadFile(ctx, true, it, "audio", "audio/mp4")) }
-                    Api.leader(ctx, "task_create", p)
-                    Toast.makeText(ctx, if (suggest) "सुझाव भेज दिया" else "टास्क भेज दिया", Toast.LENGTH_LONG).show()
+                    val res = Api.leader(ctx, "task_create", p)
+                    Toast.makeText(ctx, if (suggest) "सुझाव अध्यक्ष जी के पास भेज दिया" else if (res.optBoolean("waits")) "टास्क अध्यक्ष जी की मंज़ूरी के लिए भेज दिया" else "टास्क भेज दिया", Toast.LENGTH_LONG).show()
                     onBack()
                 } catch (e: Exception) { Toast.makeText(ctx, "भेजा नहीं जा सका", Toast.LENGTH_LONG).show() }
                 sending = false
@@ -1409,8 +1412,6 @@ private fun ReportNewPage(taskId: Long?, lc: LeaderCtx, onBack: () -> Unit) {
     var voice by remember { mutableStateOf<File?>(null) }
     val media = remember { mutableStateListOf<Attachment>() }
     var sending by remember { mutableStateOf(false) }
-    val askLocation = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { warmLocation(ctx) }
-    LaunchedEffect(Unit) { askLocation.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) }
     val wards = lc.ov.optJSONArray("wards").list().sortedBy { it.optInt("no") }
 
     if (taskId != null) Text("यह रिपोर्ट टास्क के साथ जुड़ेगी और टास्क पूरा माना जाएगा।", fontSize = 13.sp, color = Muted)
@@ -1444,7 +1445,6 @@ private fun ReportNewPage(taskId: Long?, lc: LeaderCtx, onBack: () -> Unit) {
                     ward.toIntOrNull()?.let { p.put("ward_no", it) }
                     voice?.let { p.put("audio_path", uploadFile(ctx, true, it, "audio", "audio/mp4")) }
                     taskId?.let { p.put("task_id", it) }
-                    lastLocation(ctx)?.let { p.put("lat", it.latitude).put("lng", it.longitude) }
                     Api.leader(ctx, "report_submit", p)
                     Toast.makeText(ctx, "रिपोर्ट भेज दी गई", Toast.LENGTH_LONG).show()
                     onBack()
@@ -1562,6 +1562,13 @@ private fun PersonalPage(c: Callee, preset: String, onBack: () -> Unit) {
     ) { Icon(Icons.AutoMirrored.Filled.Send, null); Text(if (sending) "  भेजा जा रहा है…" else "  भेजें", fontWeight = FontWeight.Bold) }
 }
 
+/** How many tasks this leader was given and how many are done. Just the two numbers: no points and no ranking for leaders. */
+@Composable
+private fun TaskCounts(lc: LeaderCtx) {
+    val c = lc.me.optJSONObject("task_counts") ?: return
+    Kpis(listOf("${c.optInt("given")}" to "टास्क मिले", "${c.optInt("done")}" to "टास्क पूरे किए"))
+}
+
 /** A leader's own profile: photo, name and, for everyone but the President, post, birthday and marriage details. */
 @Composable
 private fun LeaderProfilePage(lc: LeaderCtx, onLogout: () -> Unit) {
@@ -1606,6 +1613,7 @@ private fun LeaderProfilePage(lc: LeaderCtx, onLogout: () -> Unit) {
             }
         }
     }
+    if (!president) TaskCounts(lc)
     if (!president && status == "pending") Text("आपका पिछला बदलाव मंज़ूरी के लिए गया हुआ है। मंज़ूर होते ही दिखने लगेगा।", fontSize = 13.sp, color = OrangeText, lineHeight = 19.sp)
     if (!president && status == "rejected") Text("पिछला बदलाव मंज़ूर नहीं हुआ। ठीक करके फिर भेज सकते हैं।", fontSize = 13.sp, color = Color(0xFF9B1C1C), lineHeight = 19.sp)
     OutlinedTextField(name, { name = it.take(80) }, label = { Text("पूरा नाम") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))

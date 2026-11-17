@@ -198,9 +198,10 @@ function LeaderTasks() {
   const [msg, setMsg] = useState('');
   const [people, setPeople] = useState([]);
   const [form, setForm] = useState({ level: 'dp', title: '', description: '', due_date: '', target_district: '', target_assembly: '' });
+  const [open, setOpen] = useState(null);   // live task whose remarks are open
   const load = async () => {
     setTasks(await fetchAll('leader_tasks', '*', (q) => q.order('created_at', { ascending: false })));
-    setDone(await fetchAll('leader_task_done', 'task_id, mobile'));
+    setDone(await fetchAll('leader_task_done', '*'));
     setLeaders(await fetchAll('leaders', 'mobile, name, role, district, assembly', (q) => q.eq('active', true)));
     // Older databases have no block columns yet: the leader tasks must still load.
     setPeople(await fetchAll('members', 'mobile, district, zone, assembly, block_no, is_applicant', (q) => q.eq('active', true)).catch(() => []));
@@ -209,16 +210,38 @@ function LeaderTasks() {
   const districts = [...new Set([...leaders.map((l) => l.district), ...people.map(districtOf)].filter(Boolean))].sort();
   const assemblies = [...new Set(leaders.filter((l) => l.role === 'observer').map((l) => l.assembly).filter(Boolean))].sort();
 
+  // A task for ward members or Block Presidents goes into the daily tasks (Field work > Tasks): same list in the app, 100 points.
+  // It is answered with a remark or a voice note. Tasks for leaders stay here and are finished with a remark.
+  const wardSide = (level) => level === 'block' || level === 'member';
+  const toDailyTasks = async (t) => {
+    const today = istToday();
+    const { data: last } = await supabase.from('tasks').select('sort').eq('task_date', today).order('sort', { ascending: false }).limit(1);
+    return supabase.from('tasks').insert({
+      task_date: today, sort: (last?.[0]?.sort || 0) + 1, kind: 'text', title: t.title, description: t.description || null, audio_path: t.audio_path || null,
+      audience: t.level === 'block' ? 'block' : 'member', from_president: true, target_district: t.target_district || null, target_assembly: t.target_assembly || null,
+      until_date: t.due_date || null, created_by: t.created_by || 'admin',
+    });
+  };
   const push = async (e) => {
     e.preventDefault();
     const row = { ...form, status: 'active', created_by: 'admin' };
     for (const k of ['description', 'due_date', 'target_district', 'target_assembly']) if (!row[k]) row[k] = null;
-    const { error } = await supabase.from('leader_tasks').insert(row);
-    setMsg(error ? error.message : `Task sent. It shows in their app as coming from ${PRESIDENT}.`);
+    const { error } = wardSide(row.level) ? await toDailyTasks(row) : await supabase.from('leader_tasks').insert(row);
+    setMsg(error ? error.message : wardSide(row.level)
+      ? `Task sent. It is in today's tasks in the app (also listed under Field work > Tasks) and is worth 100 points.`
+      : `Task sent. It shows in their app as coming from ${PRESIDENT}.`);
     if (!error) setForm({ ...form, title: '', description: '' });
     load();
   };
-  const setStatus = async (t, status) => { await supabase.from('leader_tasks').update({ status, approved_at: status === 'active' ? new Date().toISOString() : null }).eq('id', t.id); load(); };
+  const setStatus = async (t, status) => {
+    let next = status;
+    if (status === 'active' && wardSide(t.level)) {
+      const { error } = await toDailyTasks(t);
+      if (error) { setMsg(error.message); return; }
+      next = 'moved';
+    }
+    await supabase.from('leader_tasks').update({ status: next, approved_at: status === 'active' ? new Date().toISOString() : null }).eq('id', t.id); load();
+  };
   const reach = (t) => (t.level === 'block' || t.level === 'member')
     ? people.filter((m) => (t.level === 'block' ? m.block_no != null : m.is_applicant !== false)
       && (!t.target_district || districtOf(m) === t.target_district) && (!t.target_assembly || m.assembly === t.target_assembly) && (!t.target_mobile || m.mobile === t.target_mobile))
@@ -231,7 +254,7 @@ function LeaderTasks() {
     <>
       <section className="card">
         <h2>Push a task</h2>
-        <p className="sub">Pick the level it is for. Every task shows in the app as coming from {PRESIDENT}. Block Presidents and ward members see it on their home screen, above the daily tasks.</p>
+        <p className="sub">Pick the level it is for. Every task shows in the app as coming from {PRESIDENT}. A task for Block Presidents or ward members goes into their daily tasks and is worth 100 points. Leaders finish theirs with a remark; they get no points, only a count of tasks given and done.</p>
         {msg && <div className="notice ok">{msg}</div>}
         <form className="form" onSubmit={push}>
           <label>For<select value={form.level} onChange={(e) => setForm({ ...form, level: e.target.value, target_assembly: '' })}>{LEVELS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
@@ -247,13 +270,13 @@ function LeaderTasks() {
 
       <section className="card">
         <h2>Waiting ({waiting.length})</h2>
-        <p className="sub">Task ideas from District Presidents and Observers, and General Secretary tasks still waiting for the President. Approving sends them out as from the President.</p>
+        <p className="sub">Tasks and ideas from the General Secretary, District Presidents and Observers. The President approves them in his app; you can also approve here. Once approved they go out as from the President.</p>
         <div className="tbl"><table>
           <thead><tr><th>Task</th><th>For</th><th>From</th><th>When</th><th /></tr></thead>
           <tbody>{waiting.map((t) => (
             <tr key={t.id}><td><b>{t.title}</b>{t.description && <div className="muted" style={{ fontSize: 12 }}>{t.description}</div>}</td>
               <td>{roleName(t.level)}{t.target_district ? ' · ' + t.target_district : ''}{t.target_assembly ? ' · ' + t.target_assembly : ''}</td>
-              <td>{by(t)}{t.status === 'pending' && <div className="muted" style={{ fontSize: 12 }}>Waiting for the President</div>}</td>
+              <td>{by(t)}<div className="muted" style={{ fontSize: 12 }}>{t.status === 'pending' ? 'Task, waiting for the President' : 'Idea, waiting for the President'}</div></td>
               <td className="muted">{timeAgo(t.created_at)}</td>
               <td style={{ whiteSpace: 'nowrap' }}><button className="btn sm" onClick={() => setStatus(t, 'active')}><Check size={14} />Approve</button>{' '}<button className="btn warn sm" onClick={() => setStatus(t, 'rejected')}><X size={14} />Reject</button></td></tr>))}</tbody>
         </table></div>
@@ -266,11 +289,18 @@ function LeaderTasks() {
           <thead><tr><th>Task</th><th>For</th><th>Given by</th><th>Done</th><th /></tr></thead>
           <tbody>{tasks.filter((t) => t.status === 'active').map((t) => {
             const who = reach(t), d = new Set(done.filter((x) => x.task_id === t.id).map((x) => x.mobile));
-            return (<tr key={t.id}><td><b>{t.title}</b><div className="muted" style={{ fontSize: 12 }}>{t.due_date ? 'By ' + t.due_date : ''}</div></td>
+            const marks = done.filter((x) => x.task_id === t.id);
+            return (<React.Fragment key={t.id}><tr><td><b>{t.title}</b><div className="muted" style={{ fontSize: 12 }}>{t.due_date ? 'By ' + t.due_date : ''}</div></td>
               <td>{roleName(t.level)}{t.target_district ? ' · ' + t.target_district : ''}{t.target_assembly ? ' · ' + t.target_assembly : ''}</td>
               <td>{by(t)}</td>
               <td><b>{who.filter((l) => d.has(l.mobile)).length}/{who.length}</b></td>
-              <td><button className="btn ghost sm" onClick={() => setStatus(t, 'rejected')}>Remove</button></td></tr>);
+              <td style={{ whiteSpace: 'nowrap' }}><button className="btn ghost sm" onClick={() => setOpen(open === t.id ? null : t.id)}>{open === t.id ? 'Close' : 'Remarks'}</button>{' '}<button className="btn ghost sm" onClick={() => setStatus(t, 'rejected')}>Remove</button></td></tr>
+              {open === t.id && (<tr><td colSpan="5" style={{ background: '#F8F9FB' }}>
+                {marks.map((x) => { const l = leaders.find((y) => y.mobile === x.mobile); return (
+                  <div key={x.mobile} style={{ padding: '6px 0', borderBottom: '1px solid #E3E6EB' }}><b>{l?.name || x.mobile}</b> <span className="muted" style={{ fontSize: 12 }}>{l?.assembly || l?.district || ''} · {timeAgo(x.done_at)}</span>
+                    <div>{x.note || <span className="muted">Marked done before remarks were needed{x.audio_path ? '' : '.'}</span>}{x.audio_path ? <span className="tag mute" style={{ marginLeft: 6 }}>voice note</span> : null}</div></div>); })}
+                {!marks.length && <span className="muted">Nobody has finished this yet.</span>}
+              </td></tr>)}</React.Fragment>);
           })}</tbody>
         </table></div>
       </section>
@@ -382,7 +412,6 @@ function Reports() {
                 ? <video key={m.path} src={files[m.path]} controls style={{ width: 180, borderRadius: 8 }} />
                 : <a key={m.path} href={files[m.path]} target="_blank" rel="noreferrer"><img src={files[m.path]} alt="" style={{ width: 120, height: 90, objectFit: 'cover', borderRadius: 8 }} /></a>))}
             </div>
-            {r.lat != null && <a className="muted" style={{ fontSize: 12 }} href={`https://maps.google.com/?q=${r.lat},${r.lng}`} target="_blank" rel="noreferrer">Location from the phone: {r.lat.toFixed(5)}, {r.lng.toFixed(5)}</a>}
           </div>); })}
         {!rows.length && <p className="muted"><ImageIcon size={14} /> No reports yet.</p>}
       </section>

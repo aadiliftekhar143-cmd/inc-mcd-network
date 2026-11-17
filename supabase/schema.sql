@@ -583,6 +583,39 @@ end $$;
 alter table data_issues drop constraint if exists data_issues_kind_check;
 alter table data_issues add constraint data_issues_kind_check check (kind in ('member','observer','dp','gs','president','dc','block'));
 
+-- ================================================================ v2.3: one task funnel, more task types, no location
+-- Daily tasks can now also be a checklist ('choice': tick the listed items and submit) or a written/spoken reply ('text').
+alter table tasks drop constraint if exists tasks_kind_check;
+alter table tasks add constraint tasks_kind_check check (kind in ('upload','share','choice','text'));
+alter table tasks add column if not exists options jsonb not null default '[]';       -- the lines to tick, for kind 'choice'
+alter table tasks add column if not exists audio_path text;                           -- voice note with the task
+alter table tasks add column if not exists from_president boolean not null default false;  -- came through the leaders' side
+alter table tasks add column if not exists target_district text;                      -- null = every district
+alter table tasks add column if not exists target_assembly text;
+alter table tasks add column if not exists until_date date;                           -- stays on the list until this day if not done
+alter table tasks add column if not exists created_by text;                           -- admin | president | gs | dp | observer
+alter table task_types drop constraint if exists task_types_base_check;
+alter table task_types add constraint task_types_base_check check (base in ('upload','share','choice','text'));
+-- What a ward member or Block President sent for a 'choice' or 'text' task. Sending it completes the task (100 points).
+create table if not exists task_responses (
+  task_id    bigint not null references tasks(id) on delete cascade,
+  mobile     text not null references members(mobile) on delete cascade,
+  choices    jsonb not null default '[]',
+  note       text,
+  audio_path text,
+  created_at timestamptz not null default now(),
+  primary key (task_id, mobile)
+);
+-- Leader tasks for ward members and Block Presidents move into the daily tasks once sent or approved.
+alter table leader_tasks drop constraint if exists leader_tasks_status_check;
+alter table leader_tasks add constraint leader_tasks_status_check check (status in ('active','pending','suggested','rejected','moved'));
+-- A leader finishes a task with a remark (and a voice note if they like), not a bare tick.
+alter table leader_task_done add column if not exists note text;
+alter table leader_task_done add column if not exists audio_path text;
+-- Location is no longer collected anywhere. Old values are removed with the columns.
+alter table field_reports drop column if exists lat;
+alter table field_reports drop column if exists lng;
+
 -- SECURITY: an earlier version promoted every new Supabase Auth user to admin.
 -- With public sign-ups on, anyone could make themselves an admin. Removed.
 -- Admins and telecallers are now created from the admin panel (Team tab).
@@ -625,7 +658,7 @@ $$;
 do $$
 declare t text;
 begin
-  foreach t in array array['members','sessions','tasks','media','completions','leader_messages','message_views','announcements','settings','admins','telecallers','call_logs','push_tokens','share_events','profile_requests','member_profiles','leaders','leader_sessions','leader_tasks','leader_task_done','field_reports','leader_broadcasts','inbox','leader_calls','member_ratings','member_tasks','president_messages','posters','wards','data_issues','task_types','leader_profile_requests','member_feedback','coordinator_reports','deletion_requests']
+  foreach t in array array['members','sessions','tasks','media','completions','leader_messages','message_views','announcements','settings','admins','telecallers','call_logs','push_tokens','share_events','profile_requests','member_profiles','leaders','leader_sessions','leader_tasks','leader_task_done','field_reports','leader_broadcasts','inbox','leader_calls','member_ratings','member_tasks','president_messages','posters','wards','data_issues','task_types','leader_profile_requests','member_feedback','coordinator_reports','deletion_requests','task_responses']
   loop
     execute format('alter table %I enable row level security', t);
     execute format('drop policy if exists admin_all on %I', t);
@@ -675,9 +708,10 @@ select m.mobile, m.name, m.ward_no, m.ward_name, m.zone, coalesce(m.district, m.
        c.last_completed_at, m.block_no, m.is_applicant
 from members m
 left join (
-  select mobile, count(*) as tasks_done, max(completed_at) as last_completed_at,
-         count(*) filter (where video_count >= 2 and photo_count >= 2) as full_tasks
-  from completions group by mobile
+  -- A full task: 2 photos + 2 videos for an upload task, or the reply sent for a checklist or written task.
+  select cc.mobile, count(*) as tasks_done, max(cc.completed_at) as last_completed_at,
+         count(*) filter (where (cc.video_count >= 2 and cc.photo_count >= 2) or t.kind in ('choice','text')) as full_tasks
+  from completions cc join tasks t on t.id = cc.task_id group by cc.mobile
 ) c on c.mobile = m.mobile
 left join (
   select mobile,

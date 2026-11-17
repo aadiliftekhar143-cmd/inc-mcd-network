@@ -5,8 +5,6 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.location.Location
-import android.location.LocationManager
 import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.net.Uri
@@ -222,32 +220,6 @@ internal suspend fun uploadUri(ctx: Context, leader: Boolean, uri: Uri, kind: St
     return u.getString("path")
 }
 
-/** Best location the phone already has (GPS or network). Null if not allowed or unknown. */
-@SuppressLint("MissingPermission")
-internal fun lastLocation(ctx: Context): Location? {
-    val ok = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-        ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-    if (!ok) return null
-    val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-    return listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER)
-        .mapNotNull { p -> try { lm.getLastKnownLocation(p) } catch (_: Exception) { null } }
-        .maxByOrNull { it.time }
-}
-
-/** Asks the phone for a fresh fix in the background so the next lastLocation() is current. */
-@SuppressLint("MissingPermission")
-internal fun warmLocation(ctx: Context) {
-    try {
-        val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        for (p in listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)) {
-            if (lm.isProviderEnabled(p)) {
-                @Suppress("DEPRECATION")
-                lm.requestSingleUpdate(p, { }, android.os.Looper.getMainLooper())
-            }
-        }
-    } catch (_: Exception) {}
-}
-
 /** One person a leader can call. */
 internal data class Callee(val mobile: String, val name: String, val role: String)
 
@@ -324,6 +296,61 @@ internal fun profileWhere(p: JSONObject): String = when (p.optString("role")) {
 }
 
 internal const val PRIVACY_URL = "https://congressdelhinetwork.com/privacy"
+internal const val DELETE_URL = "https://congressdelhinetwork.com/delete-account"
+
+/** The two small links at the bottom of the menu and of the login screen. */
+@Composable
+internal fun PolicyLinks(modifier: Modifier = Modifier, center: Boolean = false, before: () -> Unit = {}) {
+    val ctx = LocalContext.current
+    fun open(url: String) { before(); try { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } catch (_: Exception) {} }
+    Column(modifier, horizontalAlignment = if (center) Alignment.CenterHorizontally else Alignment.Start) {
+        listOf("Privacy Policy" to PRIVACY_URL, "Request for Account Deletion" to DELETE_URL).forEach { (label, url) ->
+            Text(label, fontSize = 12.5.sp, color = Color(0xFF2463D1), fontWeight = FontWeight.Medium,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { open(url) }.padding(horizontal = 8.dp, vertical = 7.dp))
+        }
+    }
+}
+
+/** A leader finishes a task by writing what was done (or recording it). A bare tick is not enough. */
+@Composable
+internal fun TaskDoneDialog(taskId: Long, title: String, onDismiss: () -> Unit, onDone: () -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var note by remember { mutableStateOf("") }
+    var voice by remember { mutableStateOf<File?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text("काम हो गया", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(title, fontSize = 14.sp, color = Color(0xFF3A4560), lineHeight = 20.sp)
+                OutlinedTextField(note, { note = it.take(2000) }, label = { Text("क्या किया, दो लाइन में लिखें") }, minLines = 3, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+                VoiceNote(voice) { voice = it }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (note.isBlank() && voice == null) { Toast.makeText(ctx, "दो लाइन लिखें या वॉइस नोट रिकॉर्ड करें", Toast.LENGTH_SHORT).show(); return@Button }
+                    busy = true
+                    scope.launch {
+                        try {
+                            val p = JSONObject().put("task_id", taskId).put("note", note.trim())
+                            voice?.let { p.put("audio_path", uploadFile(ctx, true, it, "audio", "audio/mp4")) }
+                            Api.leader(ctx, "task_done", p)
+                            Toast.makeText(ctx, "टास्क पूरा दर्ज हो गया", Toast.LENGTH_LONG).show()
+                            onDone()
+                        } catch (e: Exception) { Toast.makeText(ctx, "भेजा नहीं जा सका, इंटरनेट चेक करें", Toast.LENGTH_LONG).show() }
+                        busy = false
+                    }
+                },
+                enabled = !busy, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0E1B3D)),
+            ) { Text(if (busy) "भेजा जा रहा है…" else "सबमिट करें", fontWeight = FontWeight.Bold) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("रहने दें") } },
+    )
+}
 
 /** The bold line shown on every task that comes from the President, at every level. */
 @Composable
@@ -430,11 +457,7 @@ internal fun SideMenu(name: String, sub: String, items: List<MenuItem>, photo: S
                 }
             }
         }
-        val menuCtx = LocalContext.current
         Text("$APP_NAME · v${BuildConfig.VERSION_NAME}", fontSize = 12.sp, color = Color(0xFF6B7590), modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp))
-        Text("Privacy Policy", fontSize = 12.5.sp, color = Color(0xFF2463D1), fontWeight = FontWeight.Medium,
-            modifier = Modifier.padding(start = 12.dp, bottom = 12.dp).clip(RoundedCornerShape(8.dp))
-                .clickable { close(); try { menuCtx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_URL))) } catch (_: Exception) {} }
-                .padding(horizontal = 8.dp, vertical = 8.dp))
+        PolicyLinks(Modifier.padding(start = 12.dp, bottom = 10.dp)) { close() }
     }
 }

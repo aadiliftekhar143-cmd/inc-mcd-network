@@ -133,7 +133,9 @@ async function memberStats(mobile: string) {
 
 /** A daily task can be for everyone, only ward applicants, or only Block Presidents. */
 const taskIsFor = (t: any, m: any) =>
-  !t.audience || t.audience === "all" || (t.audience === "member" && m?.is_applicant !== false) || (t.audience === "block" && m?.block_no != null);
+  (!t.audience || t.audience === "all" || (t.audience === "member" && m?.is_applicant !== false) || (t.audience === "block" && m?.block_no != null)) &&
+  (!t.target_district || String(t.target_district).trim().toLowerCase() === memberDistrict(m ?? {}).toLowerCase()) &&
+  (!t.target_assembly || String(t.target_assembly).trim().toLowerCase() === String(m?.assembly ?? "").trim().toLowerCase());
 
 /** Tasks leaders gave to ward members or Block Presidents (not the daily upload tasks). */
 async function leaderTasksFor(m: any) {
@@ -161,9 +163,23 @@ const noticeIsFor = (a: any, m: any) =>
   ((!a.district && !a.zone) || sameDistrict(a.district || a.zone, m));
 
 async function tasksForDate(mobile: string, date: string, member?: any) {
-  const { data: all } = await db.from("tasks").select("*").eq("task_date", date).order("sort");
-  const tasks = member ? (all ?? []).filter((t) => taskIsFor(t, member)) : all;
+  const { data: day } = await db.from("tasks").select("*").eq("task_date", date).order("sort");
+  // On today's list, a task with a last date stays until it is done or the date passes.
+  const { data: open } = date === istToday()
+    ? await db.from("tasks").select("*").lt("task_date", date).gte("until_date", date).order("task_date")
+    : { data: [] as any[] };
+  let carried = (open ?? []).filter((t) => !member || taskIsFor(t, member));
+  if (carried.length) {
+    const { data: finished } = await db.from("completions").select("task_id").eq("mobile", mobile).in("task_id", carried.map((t) => t.id));
+    const fin = new Set((finished ?? []).map((d) => d.task_id));
+    carried = carried.filter((t) => !fin.has(t.id));
+  }
+  const all = [...carried, ...(day ?? [])];
+  const tasks = member ? all.filter((t) => taskIsFor(t, member)) : all;
   const ids = (tasks ?? []).map((t) => t.id);
+  const { data: replies } = ids.length
+    ? await db.from("task_responses").select("task_id, choices, note").eq("mobile", mobile).in("task_id", ids)
+    : { data: [] };
   const { data: media } = ids.length
     ? await db.from("media").select("task_id, kind").eq("mobile", mobile).in("task_id", ids)
     : { data: [] };
@@ -174,16 +190,18 @@ async function tasksForDate(mobile: string, date: string, member?: any) {
     ? await db.from("share_events").select("task_id, platform").eq("mobile", mobile).in("task_id", ids)
     : { data: [] };
   const doneSet = new Set((done ?? []).map((d) => d.task_id));
-  return (tasks ?? []).map((t) => {
+  return Promise.all((tasks ?? []).map(async (t) => {
     const mine = (media ?? []).filter((m) => m.task_id === t.id);
     return {
       ...t,
+      audio_url: t.audio_path ? (await db.storage.from("uploads").createSignedUrl(t.audio_path, 3600)).data?.signedUrl ?? null : null,
+      response: (replies ?? []).find((x) => x.task_id === t.id) ?? null,
       videos: mine.filter((m) => m.kind === "video").length,
       photos: mine.filter((m) => m.kind === "photo").length,
       done: doneSet.has(t.id),
       shared: (shares ?? []).filter((x) => x.task_id === t.id).map((x) => x.platform),
     };
-  });
+  }));
 }
 
 Deno.serve(async (req) => {
@@ -241,6 +259,24 @@ Deno.serve(async (req) => {
       if (!open?.length) await db.from("deletion_requests").insert({ mobile, name: member.name, reason: clean(body.reason, 500), source: "app" });
       return json({ ok: true, pending: true });
     }
+    // ---- Checklist or written task: sending the reply completes it ----
+    if (action === "task_respond") {
+      const taskId = Number(body.task_id);
+      const { data: t } = await db.from("tasks").select("*").eq("id", taskId).maybeSingle();
+      if (!t || !["choice", "text"].includes(t.kind) || !taskIsFor(t, member)) return json({ error: "no_task" }, 404);
+      const options: string[] = Array.isArray(t.options) ? t.options : [];
+      const choices = (Array.isArray(body.choices) ? body.choices : []).map((c: unknown) => String(c)).filter((c: string) => options.includes(c));
+      const note = clean(body.note, 2000);
+      const audio = typeof body.audio_path === "string" && body.audio_path.includes(`/${mobile}/`) ? body.audio_path : null;
+      if (t.kind === "choice" && !choices.length) return json({ error: "pick_one" }, 400);
+      if (t.kind === "text" && !note && !audio) return json({ error: "empty" }, 400);
+      const { error } = await db.from("task_responses").upsert({ task_id: taskId, mobile, choices, note, audio_path: audio, created_at: new Date().toISOString() });
+      if (error) throw error;
+      await db.from("completions").upsert({ mobile, task_id: taskId }, { onConflict: "mobile,task_id", ignoreDuplicates: true });
+      const list = await tasksForDate(mobile, istToday(), member);
+      return json({ ok: true, task: list.find((x) => x.id === taskId) ?? null, stats: await memberStats(mobile) });
+    }
+
     if (action === "leader_task_done") {
       const id = Number(body.task_id);
       const mine = await leaderTasksFor(member);

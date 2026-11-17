@@ -262,6 +262,23 @@ function suggestions(_districts: any[], assemblies: any[], mem: any[]) {
   return [...obs, ...mems];
 }
 
+/**
+ * A task for ward members or Block Presidents does not stay a "leader task": it goes into the daily tasks,
+ * where it looks and scores like any other task (100 points). It is answered with a remark or a voice note.
+ */
+async function moveToDailyTasks(t: any) {
+  const today = istToday();
+  const { data: last } = await db.from("tasks").select("sort").eq("task_date", today).order("sort", { ascending: false }).limit(1);
+  const { error } = await db.from("tasks").insert({
+    task_date: today, sort: (last?.[0]?.sort ?? 0) + 1, kind: "text", title: t.title, description: t.description ?? null,
+    audio_path: t.audio_path ?? null, audience: t.level === "block" ? "block" : "member", from_president: true,
+    target_district: t.target_district ?? null, target_assembly: t.target_assembly ?? null,
+    until_date: t.due_date ?? null, created_by: t.created_by ?? "president",
+  });
+  if (error) throw error;
+}
+const WARD_SIDE = ["block", "member"];
+
 /** People a task at this level and target reaches. Levels 'block' and 'member' are ward-side people, the rest are leaders. */
 function audienceOf(t: any, leaders: any[], members: any[] = []) {
   if (t.level === "block" || t.level === "member") {
@@ -349,8 +366,14 @@ Deno.serve(async (req) => {
     if (action === "me") {
       const s = await settings();
       const unread = (await db.from("inbox").select("id", { count: "exact", head: true }).eq("to_mobile", me.mobile).is("read_at", null)).count ?? 0;
+      // How many tasks this leader was given and how many they finished. No points, no ranking: just the two numbers.
+      const given = (await all("leader_tasks", "id, level, target_district, target_assembly, target_mobile", (q) => q.eq("status", "active").eq("level", me.role)))
+        .filter((t) => audienceOf(t, [me]).length);
+      const finished = given.length
+        ? (await all("leader_task_done", "task_id", (q) => q.eq("mobile", me.mobile))).filter((d) => given.some((t) => t.id === d.task_id)).length : 0;
       return json({
         leader: me, unread_inbox: unread, helpline: s.helpline ?? null, photo_url: await signed(me.photo_path),
+        task_counts: { given: given.length, done: finished },
         app_update: {
           version_code: Number(s.app_version_code || 1), version_name: s.app_version_name || "1.0",
           download_url: s.app_download_url || "https://github.com/aadiliftekhar143-cmd/inc-mcd-network/releases/latest/download/app-release.apk",
@@ -387,8 +410,10 @@ Deno.serve(async (req) => {
         };
       });
       if (me.role === "president") {
-        const pending = await all("leader_tasks", "*", (q) => q.eq("status", "pending").order("created_at", { ascending: false }));
-        res.pending = await Promise.all(pending.map(withAudio));
+        // Everything waiting for the President: tasks leaders made, and ideas they suggested.
+        const pending = await all("leader_tasks", "*", (q) => q.in("status", ["pending", "suggested"]).order("created_at", { ascending: false }));
+        const names = new Map(leaders.map((l) => [l.mobile, l.name]));
+        res.pending = await Promise.all(pending.map(async (t) => ({ ...(await withAudio(t)), by_name: names.get(t.created_by_mobile) ?? null })));
       }
       if (me.role !== "president") {
         res.created = await all("leader_tasks", "id, title, level, status, target_district, target_assembly, created_at",
@@ -398,8 +423,13 @@ Deno.serve(async (req) => {
     }
 
     if (action === "task_done") {
+      // A task is finished with a remark (or a voice note), so there is something to read behind every "done".
       const id = Number(body.task_id);
-      await db.from("leader_task_done").upsert({ task_id: id, mobile: me.mobile });
+      const note = clean(body.note, 2000);
+      const audio = typeof body.audio_path === "string" && body.audio_path.includes(`/${me.mobile}/`) ? body.audio_path : null;
+      if (!note && !audio) return json({ error: "remark_required" }, 400);
+      const { error } = await db.from("leader_task_done").upsert({ task_id: id, mobile: me.mobile, note, audio_path: audio, done_at: new Date().toISOString() });
+      if (error) throw error;
       return json({ ok: true });
     }
 
@@ -417,22 +447,26 @@ Deno.serve(async (req) => {
         target_district: clean(body.target_district, 120), target_assembly: clean(body.target_assembly, 120),
         target_mobile: clean(body.target_mobile, 10), created_by: me.role, created_by_mobile: me.mobile,
       };
-      // President: goes out at once. GS: waits for the President. DP: straight to own observers. Observer: an idea for the admin.
+      // President: goes out at once. Everyone else: waits for the President (a task from the GS or a DP, an idea from an observer).
       if (me.role === "president") row.status = "active";
       else if (me.role === "gs") row.status = "pending";
-      else if (me.role === "dp") { row.status = "active"; row.target_district = me.district; }
+      else if (me.role === "dp") { row.status = body.suggest ? "suggested" : "pending"; row.target_district = me.district; }
       else { row.status = "suggested"; row.target_assembly = me.assembly; }
-      if (me.role === "dp" && body.suggest) { row.status = "suggested"; }
+      // Ward members and Block Presidents get it in their daily tasks, not as a separate leader task.
+      if (row.status === "active" && WARD_SIDE.includes(level)) { await moveToDailyTasks(row); row.status = "moved"; }
       const { data, error } = await db.from("leader_tasks").insert(row).select("*").single();
       if (error) throw error;
-      return json({ ok: true, task: data });
+      return json({ ok: true, task: data, waits: row.status === "pending" || row.status === "suggested" });
     }
 
     if (action === "task_review") {
       if (me.role !== "president") return json({ error: "not_allowed" }, 403);
       const ok = !!body.approve;
-      await db.from("leader_tasks").update({ status: ok ? "active" : "rejected", approved_at: ok ? new Date().toISOString() : null })
-        .eq("id", Number(body.task_id)).eq("status", "pending");
+      const { data: t } = await db.from("leader_tasks").select("*").eq("id", Number(body.task_id)).in("status", ["pending", "suggested"]).maybeSingle();
+      if (!t) return json({ error: "no_task" }, 404);
+      let status = ok ? "active" : "rejected";
+      if (ok && WARD_SIDE.includes(t.level)) { await moveToDailyTasks(t); status = "moved"; }
+      await db.from("leader_tasks").update({ status, approved_at: ok ? new Date().toISOString() : null }).eq("id", t.id);
       return json({ ok: true });
     }
 
@@ -458,7 +492,6 @@ Deno.serve(async (req) => {
       const taskId = body.task_id ? Number(body.task_id) : null;
       await db.from("field_reports").insert({
         mobile: me.mobile, task_id: taskId, note, audio_path: audio, media, ward_no: wardNo, activities,
-        lat: typeof body.lat === "number" ? body.lat : null, lng: typeof body.lng === "number" ? body.lng : null,
       });
       if (taskId) await db.from("leader_task_done").upsert({ task_id: taskId, mobile: me.mobile });
       return json({ ok: true });
