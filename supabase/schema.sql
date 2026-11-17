@@ -408,7 +408,7 @@ alter table members add column if not exists alt_mobile text;
 -- and posts that have nobody yet. The admin fixes them in the Data discrepancies tab and pushes them in.
 create table if not exists data_issues (
   id         bigserial primary key,
-  kind       text not null check (kind in ('member','observer','dp','gs','president')),
+  kind       text not null check (kind in ('member','observer','dp','gs','president','dc','block')),
   issue      text not null,
   data       jsonb not null default '{}',   -- name, mobile, ward_no, ward_name, assembly, district, lok_sabha...
   status     text not null default 'open' check (status in ('open','resolved','dismissed')),
@@ -419,6 +419,169 @@ create index if not exists data_issues_status_idx on data_issues (status, kind);
 
 -- Admin's own tag on a message to the President (critical, concern, positive...). Shown to the President.
 alter table president_messages add column if not exists admin_tag text;
+
+-- ================================================================ v2.1: more levels, block presidents, reports
+-- District Coordinators ('dc'): one per organisational district, they report only to the General Secretary.
+alter table leaders drop constraint if exists leaders_role_check;
+alter table leaders add constraint leaders_role_check check (role in ('president','gs','dc','dp','observer'));
+-- Leader profile (photo, post in the party, birthday...). Edits wait for the admin, except the President's own.
+alter table leaders add column if not exists photo_path text;
+alter table leaders add column if not exists position text;
+alter table leaders add column if not exists dob date;
+alter table leaders add column if not exists gender text;
+alter table leaders add column if not exists married boolean;
+alter table leaders add column if not exists anniversary date;
+create table if not exists leader_profile_requests (
+  id           bigserial primary key,
+  mobile       text not null references leaders(mobile) on delete cascade,
+  name         text not null,
+  position     text,
+  dob          date,
+  gender       text,
+  married      boolean,
+  anniversary  date,
+  photo_path   text,
+  status       text not null default 'pending' check (status in ('pending','approved','rejected')),
+  submitted_at timestamptz not null default now(),
+  reviewed_at  timestamptz,
+  reviewed_by  text
+);
+create index if not exists leader_profile_requests_idx on leader_profile_requests (status, submitted_at desc);
+
+-- Block Presidents stand beside ward members: same app, same tasks, same points. One block per ward (250).
+-- block_no set = Block President of that block. is_applicant false = only a Block President, not a ward applicant.
+alter table members add column if not exists is_applicant boolean not null default true;
+alter table members add column if not exists block_no int;
+create index if not exists members_block_idx on members (block_no) where block_no is not null;
+
+-- Who a daily task is for, and the admin's own name for the kind of task.
+alter table tasks add column if not exists audience text not null default 'all';   -- all | member | block
+alter table tasks add column if not exists type_label text;
+create table if not exists task_types (
+  label      text primary key,
+  base       text not null check (base in ('upload','share')),   -- how it works in the app
+  created_at timestamptz not null default now()
+);
+
+-- Leader tasks can now go to coordinators, block presidents and ward members too.
+alter table leader_tasks drop constraint if exists leader_tasks_level_check;
+alter table leader_tasks add constraint leader_tasks_level_check check (level in ('gs','dc','dp','observer','block','member'));
+-- "Done" ticks now also come from members and block presidents, so the mobile is no longer tied to leaders.
+alter table leader_task_done drop constraint if exists leader_task_done_mobile_fkey;
+
+-- Visit report: which ward, and what was done there (ticked from a short list).
+alter table field_reports add column if not exists ward_no int;
+alter table field_reports add column if not exists activities jsonb not null default '[]';
+
+-- Observer's monthly feedback on each ward member. The month just ended opens on the 1st and stays open all month.
+create table if not exists member_feedback (
+  id              bigserial primary key,
+  observer_mobile text not null references leaders(mobile) on delete cascade,
+  member_mobile   text not null,
+  month           date not null,                 -- first day of the month the feedback is about
+  flags           jsonb not null default '[]',   -- ticked lines
+  note            text,
+  audio_path      text,
+  created_at      timestamptz not null default now(),
+  unique (observer_mobile, member_mobile, month)
+);
+create index if not exists member_feedback_month_idx on member_feedback (month, observer_mobile);
+
+-- District Coordinator's daily calling report to the General Secretary. Counts come from the calls made in the app.
+create table if not exists coordinator_reports (
+  id          bigserial primary key,
+  mobile      text not null references leaders(mobile) on delete cascade,
+  report_date date not null,
+  calls       int not null default 0,
+  talked      int not null default 0,
+  note        text,
+  created_at  timestamptz not null default now(),
+  unique (mobile, report_date)
+);
+
+-- Requests to delete an account and its data, from the app or from the public web page (Google Play needs both).
+create table if not exists deletion_requests (
+  id           bigserial primary key,
+  mobile       text not null,
+  name         text,
+  reason       text,
+  source       text not null default 'app',      -- app | web
+  status       text not null default 'pending' check (status in ('pending','done','rejected')),
+  created_at   timestamptz not null default now(),
+  processed_at timestamptz,
+  processed_by text
+);
+create index if not exists deletion_requests_idx on deletion_requests (status, created_at desc);
+
+-- Notifications can be for one level only. null = ward members (as before).
+alter table announcements add column if not exists audience text;   -- null | block | gs | dc | dp | observer
+alter table announcements add column if not exists sent_count int;
+
+-- An approved profile is also the truth for the ward members list: name and area follow it. The login number never changes here.
+create or replace function sync_member_from_profile() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare w wards%rowtype;
+begin
+  select * into w from wards where ward_no = new.ward_no;
+  update members m set
+    name      = coalesce(nullif(trim(new.full_name), ''), m.name),
+    ward_no   = coalesce(new.ward_no, m.ward_no),
+    ward_name = coalesce(w.ward_name, m.ward_name),
+    assembly  = coalesce(w.assembly, nullif(trim(new.assembly), ''), m.assembly),
+    district  = coalesce(w.district, nullif(trim(new.district), ''), m.district),
+    lok_sabha = coalesce(w.lok_sabha, nullif(trim(new.lok_sabha), ''), m.lok_sabha),
+    alt_mobile = coalesce(new.alt_mobile, m.alt_mobile)
+  where m.mobile = new.mobile;
+  return new;
+end $$;
+drop trigger if exists member_profiles_sync on member_profiles;
+create trigger member_profiles_sync after insert or update on member_profiles
+  for each row execute function sync_member_from_profile();
+-- Profiles approved before this trigger existed: pull them in once.
+do $$ begin
+  if not exists (select 1 from settings where key = 'profile_sync_done') then
+    update member_profiles set approved_at = approved_at;
+    insert into settings (key, value) values ('profile_sync_done', 'yes');
+  end if;
+end $$;
+
+-- Admin changes a ward member's login number. Everything they did moves to the new number; old logins stop working.
+create or replace function change_member_mobile(old_mobile text, new_mobile text) returns void
+language plpgsql security definer set search_path = public as $$
+declare also_leader boolean;
+begin
+  if not is_admin() then raise exception 'not_allowed'; end if;
+  if new_mobile !~ '^[6-9][0-9]{9}$' then raise exception 'bad_mobile'; end if;
+  if old_mobile = new_mobile then return; end if;
+  if not exists (select 1 from members where mobile = old_mobile) then raise exception 'no_member'; end if;
+  if exists (select 1 from members where mobile = new_mobile) then raise exception 'number_in_use'; end if;
+  insert into members
+    select (jsonb_populate_record(null::members, to_jsonb(m) || jsonb_build_object('mobile', new_mobile))).*
+    from members m where m.mobile = old_mobile;
+  update media            set mobile = new_mobile where mobile = old_mobile;
+  update completions      set mobile = new_mobile where mobile = old_mobile;
+  update message_views    set mobile = new_mobile where mobile = old_mobile;
+  update share_events     set mobile = new_mobile where mobile = old_mobile;
+  update profile_requests set mobile = new_mobile where mobile = old_mobile;
+  update member_profiles  set mobile = new_mobile where mobile = old_mobile;
+  update member_tasks     set mobile = new_mobile where mobile = old_mobile;
+  update push_tokens      set mobile = new_mobile where mobile = old_mobile;
+  update call_logs        set member_mobile = new_mobile where member_mobile = old_mobile;
+  update member_ratings   set member_mobile = new_mobile where member_mobile = old_mobile;
+  update member_feedback  set member_mobile = new_mobile where member_mobile = old_mobile;
+  update president_messages set mobile = new_mobile where mobile = old_mobile and sender_role = 'member';
+  -- The inbox and leader-task ticks are shared with a leader profile on the same number; leave them if there is one.
+  select exists (select 1 from leaders where mobile = old_mobile) into also_leader;
+  if not also_leader then
+    update inbox set to_mobile = new_mobile where to_mobile = old_mobile;
+    update leader_task_done set mobile = new_mobile where mobile = old_mobile
+      and not exists (select 1 from leader_task_done d where d.task_id = leader_task_done.task_id and d.mobile = new_mobile);
+  end if;
+  delete from members where mobile = old_mobile;   -- also ends the old sessions
+end $$;
+
+alter table data_issues drop constraint if exists data_issues_kind_check;
+alter table data_issues add constraint data_issues_kind_check check (kind in ('member','observer','dp','gs','president','dc','block'));
 
 -- SECURITY: an earlier version promoted every new Supabase Auth user to admin.
 -- With public sign-ups on, anyone could make themselves an admin. Removed.
@@ -462,7 +625,7 @@ $$;
 do $$
 declare t text;
 begin
-  foreach t in array array['members','sessions','tasks','media','completions','leader_messages','message_views','announcements','settings','admins','telecallers','call_logs','push_tokens','share_events','profile_requests','member_profiles','leaders','leader_sessions','leader_tasks','leader_task_done','field_reports','leader_broadcasts','inbox','leader_calls','member_ratings','member_tasks','president_messages','posters','wards','data_issues']
+  foreach t in array array['members','sessions','tasks','media','completions','leader_messages','message_views','announcements','settings','admins','telecallers','call_logs','push_tokens','share_events','profile_requests','member_profiles','leaders','leader_sessions','leader_tasks','leader_task_done','field_reports','leader_broadcasts','inbox','leader_calls','member_ratings','member_tasks','president_messages','posters','wards','data_issues','task_types','leader_profile_requests','member_feedback','coordinator_reports','deletion_requests']
   loop
     execute format('alter table %I enable row level security', t);
     execute format('drop policy if exists admin_all on %I', t);
@@ -509,7 +672,7 @@ select m.mobile, m.name, m.ward_no, m.ward_name, m.zone, coalesce(m.district, m.
        (coalesce(sh.shares, 0) * 100 + coalesce(c.full_tasks, 0) * 100 + coalesce(st.approved, 0) * 100) as points,
        coalesce(c.full_tasks, 0) as full_tasks,
        coalesce(st.approved, 0) as own_tasks,
-       c.last_completed_at
+       c.last_completed_at, m.block_no, m.is_applicant
 from members m
 left join (
   select mobile, count(*) as tasks_done, max(completed_at) as last_completed_at,

@@ -5,7 +5,9 @@ import { Check, X, TriangleAlert, Download } from './icons.jsx';
 
 // The structure: Lok Sabha > Congress organisational district > Vidhan Sabha > MCD ward.
 // Leaders: DPCC President > General Secretary > District Presidents > Assembly Observers > ward members.
-const KIND = { member: 'Ward member', observer: 'Assembly Observer', dp: 'District President', gs: 'General Secretary', president: 'DPCC President' };
+const KIND = { member: 'Ward member', observer: 'Assembly Observer', dp: 'District President', dc: 'District Coordinator', gs: 'General Secretary', president: 'DPCC President', block: 'Block President' };
+/** Names compared without spaces, dots or case, so "Md. Arif" and "MD ARIF" count as the same person. */
+const sameName = (a, b) => txt(a).toLowerCase().replace(/[^a-z\u0900-\u097f]/g, '') === txt(b).toLowerCase().replace(/[^a-z\u0900-\u097f]/g, '');
 const phone = (v) => { const d = String(v ?? '').split('.')[0].replace(/\D/g, '').slice(-10); return /^[6-9]\d{9}$/.test(d) ? d : ''; };
 const txt = (v) => String(v ?? '').trim();
 const sheet = (wb, name) => {
@@ -29,7 +31,7 @@ function readMaster(wb) {
     district: txt(r['Congress District']) || null, ac_no: Number(r['AC No']) || null, assembly: txt(r['Assembly Constituency']) || null,
     revenue_district: txt(r['Revenue District']) || null,
   }));
-  const members = [], seen = new Map();
+  const members = [], seen = new Map(); let repeats = 0;
   for (const r of M) {
     const base = {
       name: txt(r['Aspirant Name']), mobile: phone(r['Phone']), raw_phone: txt(r['Phone']), ward_no: Number(r['Ward No']) || null,
@@ -40,7 +42,14 @@ function readMaster(wb) {
     if (!base.name) why.push('Name missing');
     if (!base.ward_no || base.ward_no > 250) why.push('Not an MCD ward (NDMC / Cantonment) or ward number missing');
     if (!base.mobile) why.push(base.raw_phone ? `Phone incomplete or wrong (${base.raw_phone})` : 'Phone missing');
-    else if (seen.has(base.mobile)) { const o = seen.get(base.mobile); why.push(`Same phone as ${o.name} (ward ${o.ward_no}). One number can log in to one ward only.`); }
+    else if (seen.has(base.mobile)) {
+      const o = seen.get(base.mobile);
+      // Same number, same name, same ward: the row is simply repeated in the sheet. Nothing to fix.
+      if (sameName(o.name, base.name) && o.ward_no === base.ward_no) { repeats += 1; continue; }
+      why.push(sameName(o.name, base.name)
+        ? `${o.name} is already loaded in ward ${o.ward_no}. One person can be a ward member of one ward only: keep that ward, or change it here.`
+        : `Same phone as ${o.name} (ward ${o.ward_no}), but a different name. One number is one person: correct the number for one of them.`);
+    }
     if (why.length) { issues.push({ kind: 'member', issue: why.join('; '), data: base }); continue; }
     seen.set(base.mobile, base);
     const { raw_phone, sheet_row, ...row } = base;
@@ -59,7 +68,7 @@ function readMaster(wb) {
   }
   const districts = [...new Set(wards.map((w) => w.district).filter(Boolean))].sort();
   const both = observers.filter((o) => seen.has(o.mobile)).length;
-  return { wards, members, observers, issues, districts, both };
+  return { wards, members, observers, issues, districts, both, repeats };
 }
 
 function IssueRow({ it, wards, onDone }) {
@@ -92,7 +101,7 @@ function IssueRow({ it, wards, onDone }) {
           if (!w) throw new Error('Pick the Vidhan Sabha.');
           row.assembly = w.assembly; row.district = w.district;
         }
-        if (role === 'dp') { if (!d.district) throw new Error('Pick the district.'); row.district = d.district; }
+        if (role === 'dp' || role === 'dc') { if (!d.district) throw new Error('Pick the district.'); row.district = d.district; }
         const { data: ex } = await supabase.from('leaders').select('name, role').eq('mobile', mobile).maybeSingle();
         if (ex && (ex.role !== role || ex.name.trim().toLowerCase() !== name.toLowerCase())) throw new Error(`This number is already ${ex.name} (${KIND[ex.role]}). One number can hold one leader post.`);
         const { error } = await supabase.from('leaders').upsert(row);
@@ -111,7 +120,7 @@ function IssueRow({ it, wards, onDone }) {
       <td>
         {it.kind === 'member' && <select value={d.ward_no || ''} onChange={set('ward_no')} style={{ maxWidth: 220 }}><option value="">Pick ward</option>{wards.map((w) => <option key={w.ward_no} value={w.ward_no}>{w.ward_no} · {w.ward_name} ({w.assembly})</option>)}</select>}
         {it.kind === 'observer' && <select value={d.assembly || ''} onChange={set('assembly')} style={{ maxWidth: 220 }}><option value="">Pick Vidhan Sabha</option>{assemblies.map((a) => <option key={a}>{a}</option>)}</select>}
-        {it.kind === 'dp' && <select value={d.district || ''} onChange={set('district')} style={{ maxWidth: 220 }}><option value="">Pick district</option>{districts.map((a) => <option key={a}>{a}</option>)}</select>}
+        {(it.kind === 'dp' || it.kind === 'dc') && <select value={d.district || ''} onChange={set('district')} style={{ maxWidth: 220 }}><option value="">Pick district</option>{districts.map((a) => <option key={a}>{a}</option>)}</select>}
         {(it.kind === 'gs' || it.kind === 'president') && <span className="muted">All Delhi</span>}
         {err && <div className="notice" style={{ marginTop: 6, maxWidth: 260 }}>{err}</div>}
       </td>
@@ -155,11 +164,12 @@ export default function DataIssues() {
       if (!leaders.some((l) => l.role === 'president')) gaps.push({ kind: 'president', issue: 'DPCC President login not added yet', data: { name: 'Devender Yadav' } });
       if (!leaders.some((l) => l.role === 'gs')) gaps.push({ kind: 'gs', issue: 'General Secretary not added yet', data: {} });
       for (const d of m.districts) if (!leaders.some((l) => l.role === 'dp' && (l.district || '').toLowerCase() === d.toLowerCase())) gaps.push({ kind: 'dp', issue: `No District President added for ${d}`, data: { district: d } });
+      for (const d of m.districts) if (!leaders.some((l) => l.role === 'dc' && (l.district || '').toLowerCase() === d.toLowerCase())) gaps.push({ kind: 'dc', issue: `No District Coordinator added for ${d}`, data: { district: d } });
       // A fresh import replaces the open list, so the same rows are not listed twice.
       await supabase.from('data_issues').delete().eq('status', 'open');
       const all = [...m.issues, ...gaps];
       for (let i = 0; i < all.length; i += 500) { const { error } = await supabase.from('data_issues').insert(all.slice(i, i + 500)); if (error) throw error; }
-      setMsg(`Loaded ${fmt(m.wards.length)} wards, ${fmt(m.members.length)} ward members and ${fmt(m.observers.length)} observers. ${fmt(m.both)} observers are also ward members (they will see both profiles). ${fmt(all.length)} rows need a look and are listed here.`);
+      setMsg(`Loaded ${fmt(m.wards.length)} wards, ${fmt(m.members.length)} ward members and ${fmt(m.observers.length)} observers. ${fmt(m.both)} observers are also ward members: same number, both posts, not a discrepancy.${m.repeats ? ` ${fmt(m.repeats)} repeated rows were skipped.` : ''} ${fmt(all.length)} rows need a look and are listed here.`);
       await load();
     } catch (err) { setMsg('Import stopped: ' + (err.message || err)); }
     setBusy(false); e.target.value = '';
@@ -196,7 +206,7 @@ export default function DataIssues() {
             <p className="sub">Correct the row and press "Save and add". It goes into the ward member list or the leader list and leaves this page. "Dismiss" removes a row you don't want loaded.</p>
           </div>
           <div className="seg">
-            {[['all', `All ${issues.length}`], ['member', `Ward members ${n('member')}`], ['observer', `Observers ${n('observer')}`], ['dp', `District Presidents ${n('dp')}`], ['gs', `GS ${n('gs')}`], ['president', `President ${n('president')}`]].map(([k, l]) => (
+            {[['all', `All ${issues.length}`], ['member', `Ward members ${n('member')}`], ['observer', `Observers ${n('observer')}`], ['dp', `District Presidents ${n('dp')}`], ['dc', `Coordinators ${n('dc')}`], ['gs', `GS ${n('gs')}`], ['president', `President ${n('president')}`]].map(([k, l]) => (
               <button key={k} className={kind === k ? 'on' : ''} onClick={() => { setKind(k); setShown(50); }}>{l}</button>))}
           </div>
         </div>

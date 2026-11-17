@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import LeaderProfiles from './LeaderProfiles.jsx';
 import { supabase, fetchAll, fmt, wardLabel, timeAgo } from './lib.js';
 import { Check, X, UserCheck, Users, Clock } from './icons.jsx';
 
@@ -60,7 +61,7 @@ export default function ProfileUpdates() {
     }
     const { error } = await supabase.from('profile_requests')
       .update({ status: ok ? 'approved' : 'rejected', reviewed_at: new Date().toISOString(), reviewed_by: who }).eq('id', r.id);
-    setMsg(error ? error.message : ok ? 'Approved. The details are now in the member profile.' : 'Rejected.');
+    setMsg(error ? error.message : ok ? 'Approved. The name and area are now updated in the Ward members list too. The login number stays the same.' : 'Rejected.');
     setBusy(null); load();
   };
 
@@ -68,6 +69,7 @@ export default function ProfileUpdates() {
 
   return (
     <>
+      <LeaderProfiles />
       <section className="kpis" aria-label="Profile update numbers">
         <div className="card kpi"><div className="l">Waiting for approval</div><div className="v">{fmt(stats.pending)}</div></div>
         <div className="card kpi"><div className="l">Approved</div><div className="v">{fmt(stats.approved)}</div><div className="s">{fmt(stats.rejected)} rejected</div></div>

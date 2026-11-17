@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Delete my account | INC MCD NETWORK</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#F4F6FA;color:#1E293B;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans Devanagari",sans-serif;line-height:1.65}
+    header{background:#0E1B3D;color:#fff;padding:22px 16px}header div{max-width:820px;margin:0 auto;display:flex;gap:14px;align-items:center}
+    header img{width:52px;height:52px;border-radius:50%;background:#fff;padding:3px}header h1{font-size:19px;margin:0}header p{margin:2px 0 0;font-size:13px;color:#AFC0E3}
+    main{max-width:820px;margin:0 auto;padding:22px 16px 60px}section{background:#fff;border:1px solid #E3E7EF;border-radius:14px;padding:20px 22px;margin-bottom:16px}
+    h2{font-size:17px;margin:0 0 8px;color:#0E1B3D}h3{font-size:15px;margin:16px 0 4px;color:#0E1B3D}p,li{font-size:14.5px}ul{padding-left:20px;margin:6px 0}
+    .muted{color:#64748B;font-size:13px}a{color:#1B4FA8}table{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}td,th{border:1px solid #E3E7EF;padding:8px 10px;text-align:left;vertical-align:top}th{background:#F1F4FA}
+    label{display:block;font-size:13.5px;font-weight:600;margin:12px 0 4px}input,textarea{width:100%;padding:12px 14px;border:1.5px solid #B8C1D1;border-radius:10px;font-size:15px;font-family:inherit}
+    button{margin-top:16px;background:#B42318;color:#fff;border:0;border-radius:10px;padding:13px 20px;font-size:15px;font-weight:700;cursor:pointer}button:disabled{opacity:.6}
+    .ok{background:#E3F1E7;color:#1B5E33;padding:12px 14px;border-radius:10px;margin-top:14px}.err{background:#FDF1E8;color:#8A3D07;padding:12px 14px;border-radius:10px;margin-top:14px}
+    nav{font-size:13.5px;margin-bottom:14px}nav a{margin-right:14px}
+  </style>
+</head>
+<body>
+  <header><div><img src="/logo.png" alt=""><div><h1>INC MCD NETWORK</h1><p>दिल्ली प्रदेश कांग्रेस कमेटी · Delhi Pradesh Congress Committee</p></div></div></header>
+  <main>
+    <nav><a href="/privacy">Privacy Policy · गोपनीयता नीति</a><a href="/delete-account">Delete my account · खाता हटाएं</a></nav>
+
+    <section>
+      <h2>Delete my account · खाता हटाएं</h2>
+      <p>Use this page to ask for your INC MCD NETWORK account and its data to be deleted. You do not need the app for this.</p>
+      <p>इस पेज से आप अपना INC MCD NETWORK खाता और उसका पूरा डेटा हटाने का अनुरोध भेज सकते हैं। इसके लिए ऐप होना ज़रूरी नहीं है।</p>
+      <h3>What gets deleted · क्या हटेगा</h3>
+      <ul>
+        <li>Your login, profile and profile photo · आपका लॉगिन, प्रोफ़ाइल और फोटो</li>
+        <li>Your points, completed tasks and shares · आपके अंक, पूरे किए टास्क और शेयर</li>
+        <li>Photos, videos and voice notes you uploaded · आपके अपलोड किए फोटो, वीडियो और वॉइस नोट</li>
+        <li>Messages you sent and received in the app · ऐप में भेजे और मिले संदेश</li>
+      </ul>
+      <p class="muted">Totals in old reports stay, without your name. The DPCC office will call your number to confirm before deleting. Deletion normally takes up to 7 days.<br>पुरानी रिपोर्ट की कुल गिनती बिना आपके नाम के रहती है। हटाने से पहले DPCC कार्यालय आपके नंबर पर कॉल करके पुष्टि करेगा। इसमें आम तौर पर 7 दिन तक लगते हैं।</p>
+      <form id="f">
+        <label for="name">Your name · आपका नाम</label>
+        <input id="name" required maxlength="80" autocomplete="name">
+        <label for="mobile">Mobile number you log in with · लॉगिन वाला मोबाइल नंबर</label>
+        <input id="mobile" required inputmode="numeric" pattern="[0-9 +-]{10,14}" autocomplete="tel">
+        <label for="reason">Reason (optional) · कारण (चाहें तो लिखें)</label>
+        <textarea id="reason" rows="3" maxlength="500"></textarea>
+        <button id="b" type="submit">Send deletion request · अनुरोध भेजें</button>
+      </form>
+      <div id="out"></div>
+    </section>
+  </main>
+  <script>
+    var API = 'https://xqbjqfjystiakfuwplby.supabase.co/functions/v1/app';
+    document.getElementById('f').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var b = document.getElementById('b'), out = document.getElementById('out');
+      b.disabled = true; out.className = ''; out.textContent = '';
+      fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+        action: 'delete_request_web', name: document.getElementById('name').value, mobile: document.getElementById('mobile').value, reason: document.getElementById('reason').value }) })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (x) {
+          if (x.ok) { out.className = 'ok'; out.textContent = 'Request received. The office will call you to confirm. · अनुरोध मिल गया। कार्यालय पुष्टि के लिए आपको कॉल करेगा।'; document.getElementById('f').reset(); }
+          else { out.className = 'err'; out.textContent = 'Please enter your name and a correct 10-digit mobile number. · कृपया नाम और सही 10 अंकों का मोबाइल नंबर भरें।'; }
+        })
+        .catch(function () { out.className = 'err'; out.textContent = 'Could not send. Check the internet and try again. · भेजा नहीं जा सका। इंटरनेट चेक करके दोबारा कोशिश करें।'; })
+        .then(function () { b.disabled = false; });
+    });
+  </script>
+</body>
+</html>

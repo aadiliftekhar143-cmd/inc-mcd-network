@@ -15,11 +15,35 @@ export default function Reports() {
   const [district, setDistrict] = useState('all');
   const [onlyActive, setOnlyActive] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [date, setDate] = useState('');          // member reports: '' = all time, else one day's work
+  const [dayWork, setDayWork] = useState(null);  // mobile -> { tasks, videos, photos, shares } for that day
+  const [taskDate, setTaskDate] = useState(null); // task report: null = latest day with tasks, '' = all dates
 
   useEffect(() => {
     fetchAll('member_stats').then(setMembers);
     fetchAll('task_stats', '*', (x) => x.order('task_date').order('sort')).then(setTasks);
   }, []);
+
+  // One day's work per member: completions, uploads and shares on the tasks of that date.
+  useEffect(() => {
+    if (!date) { setDayWork(null); return; }
+    const ids = tasks.filter((t) => t.task_date === date).map((t) => t.id);
+    if (!ids.length) { setDayWork({}); return; }
+    let live = true;
+    (async () => {
+      const [done, media, shares] = await Promise.all([
+        fetchAll('completions', 'mobile, task_id', (x) => x.in('task_id', ids)),
+        fetchAll('media', 'mobile, kind', (x) => x.in('task_id', ids)),
+        fetchAll('share_events', 'mobile', (x) => x.in('task_id', ids)),
+      ]);
+      const w = {}; const row = (m) => (w[m] ||= { tasks: 0, videos: 0, photos: 0, shares: 0 });
+      done.forEach((d) => { row(d.mobile).tasks += 1; });
+      media.forEach((x) => { row(x.mobile)[x.kind === 'video' ? 'videos' : 'photos'] += 1; });
+      shares.forEach((x) => { row(x.mobile).shares += 1; });
+      if (live) setDayWork(w);
+    })();
+    return () => { live = false; };
+  }, [date, tasks]);
 
   const ranked = useMemo(() => {
     const sorted = members.map((m) => ({ ...m })).sort((a, b) => b.points - a.points || b.tasks_done - a.tasks_done);
@@ -35,8 +59,15 @@ export default function Reports() {
   const districts = useMemo(() => [...new Set(members.map(districtOf).filter(Boolean))].sort(), [members]);
   const uploadTasks = tasks.filter((t) => t.kind === 'upload' && t.task_date <= istToday());
 
+  const dayOf = (m) => (dayWork && dayWork[m.mobile]) || { tasks: 0, videos: 0, photos: 0, shares: 0 };
+  const dayTasks = date ? tasks.filter((t) => t.task_date === date && t.kind === 'upload').length : 0;
+  const taskDates = [...new Set(tasks.map((t) => t.task_date))].sort();
+  const shownTaskDate = taskDate === null ? (taskDates.filter((d) => d <= istToday()).pop() || '') : taskDate;
+  const taskRows = [...tasks].reverse().filter((t) => !shownTaskDate || t.task_date === shownTaskDate);
+
   const list = ranked.filter((m) => {
-    if (onlyActive && !(m.tasks_done > 0 || m.videos > 0)) return false;
+    if (date) { const w = dayOf(m); if (onlyActive && !(w.tasks || w.videos || w.photos || w.shares)) return false; }
+    else if (onlyActive && !(m.tasks_done > 0 || m.videos > 0)) return false;
     if (district !== 'all' && districtOf(m) !== district) return false;
     if (q) { const s = q.trim().toLowerCase(); if (!m.name.toLowerCase().includes(s) && !m.mobile.includes(s) && String(m.ward_no) !== s) return false; }
     return true;
@@ -101,11 +132,15 @@ export default function Reports() {
               <option value="all">All districts</option>
               {districts.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
+            <label htmlFor="rdate">Date</label>
+            <input id="rdate" type="date" value={date} max={istToday()} onChange={(e) => setDate(e.target.value)} />
+            {date && <button className="btn ghost sm" onClick={() => setDate('')}>All time</button>}
             <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
               <input type="checkbox" checked={onlyActive} onChange={(e) => setOnlyActive(e.target.checked)} /> Only members who uploaded or completed
             </label>
-            <span className="muted" style={{ fontSize: 13 }}>{fmt(list.length)} members</span>
+            <span className="muted" style={{ fontSize: 13 }}>{fmt(list.length)} members{date ? ` · work on ${dayLabel(date)}` : ' · all time'}</span>
           </div>
+          {date && dayWork && !tasks.some((t) => t.task_date === date) && <p className="muted">No task or share card was given on {dayLabel(date)}.</p>}
           <div className="tbl">
             <table>
               <thead><tr><th>Rank</th><th>Member</th><th>Ward</th><th>District</th><th>Tasks</th><th>Videos</th><th>Photos</th><th>Shares</th><th>Points</th><th>Last done</th><th /></tr></thead>
@@ -116,8 +151,8 @@ export default function Reports() {
                     <td><b>{m.name}</b><div className="muted" style={{ fontSize: 12 }}>{m.mobile}</div></td>
                     <td>{wardLabel(m.ward_no)}<div className="muted" style={{ fontSize: 12 }}>#{m.wardRank} of {m.wardSize}</div></td>
                     <td className="muted">{districtOf(m) || '–'}</td>
-                    <td><b>{m.tasks_done}</b>/{uploadTasks.length}</td>
-                    <td>{m.videos}</td><td>{m.photos}</td><td>{m.shares}</td>
+                    {date ? (<><td><b>{dayOf(m).tasks}</b>/{dayTasks}</td><td>{dayOf(m).videos}</td><td>{dayOf(m).photos}</td><td>{dayOf(m).shares}</td></>)
+                      : (<><td><b>{m.tasks_done}</b>/{uploadTasks.length}</td><td>{m.videos}</td><td>{m.photos}</td><td>{m.shares}</td></>)}
                     <td><span className="pts-badge">{fmt(m.points)}</span></td>
                     <td className="muted">{timeAgo(m.last_completed_at)}</td>
                     <td><button className="btn sm" onClick={() => setSelected(m)}>Open report</button></td>
@@ -139,11 +174,17 @@ export default function Reports() {
             </div>
             <button className="btn ghost" onClick={exportTasks}>Export</button>
           </div>
+          <div className="filters" style={{ marginTop: 14 }}>
+            <label htmlFor="tdate">Date</label>
+            <input id="tdate" type="date" value={shownTaskDate} onChange={(e) => setTaskDate(e.target.value)} />
+            <button className={'btn sm ' + (shownTaskDate ? 'ghost' : '')} onClick={() => setTaskDate('')}>All dates</button>
+            <span className="muted" style={{ fontSize: 13 }}>{fmt(taskRows.length)} tasks and share cards{shownTaskDate ? ` on ${dayLabel(shownTaskDate)}` : ''}</span>
+          </div>
           <div className="tbl">
             <table>
               <thead><tr><th>Date</th><th>Task</th><th>Completed</th><th>Videos</th><th>Photos</th><th>X</th><th>Facebook</th><th>Instagram</th><th>WhatsApp</th></tr></thead>
               <tbody>
-                {[...tasks].reverse().map((t) => (
+                {taskRows.map((t) => (
                   <tr key={t.id}>
                     <td style={{ whiteSpace: 'nowrap' }}>{dayLabel(t.task_date)}</td>
                     <td><b>{t.title}</b><div className="muted" style={{ fontSize: 12 }}>{t.kind === 'upload' ? 'Task' : 'Share card'}</div></td>
@@ -155,7 +196,7 @@ export default function Reports() {
                 ))}
               </tbody>
             </table>
-            {!tasks.length && <p className="muted">No tasks yet.</p>}
+            {!taskRows.length && <p className="muted">{tasks.length ? 'Nothing was given on this date. Pick another date or press All dates.' : 'No tasks yet.'}</p>}
           </div>
         </section>
       )}

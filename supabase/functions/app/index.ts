@@ -131,8 +131,38 @@ async function memberStats(mobile: string) {
   };
 }
 
-async function tasksForDate(mobile: string, date: string) {
-  const { data: tasks } = await db.from("tasks").select("*").eq("task_date", date).order("sort");
+/** A daily task can be for everyone, only ward applicants, or only Block Presidents. */
+const taskIsFor = (t: any, m: any) =>
+  !t.audience || t.audience === "all" || (t.audience === "member" && m?.is_applicant !== false) || (t.audience === "block" && m?.block_no != null);
+
+/** Tasks leaders gave to ward members or Block Presidents (not the daily upload tasks). */
+async function leaderTasksFor(m: any) {
+  const levels = [m.is_applicant !== false ? "member" : null, m.block_no != null ? "block" : null].filter(Boolean) as string[];
+  if (!levels.length) return [];
+  const { data: ts } = await db.from("leader_tasks").select("*").eq("status", "active").in("level", levels).order("created_at", { ascending: false }).limit(30);
+  const mine = (ts ?? []).filter((t) =>
+    (!t.target_mobile || t.target_mobile === m.mobile) &&
+    (!t.target_district || String(t.target_district).trim().toLowerCase() === memberDistrict(m).toLowerCase()) &&
+    (!t.target_assembly || String(t.target_assembly).trim().toLowerCase() === String(m.assembly ?? "").trim().toLowerCase()));
+  if (!mine.length) return [];
+  const { data: done } = await db.from("leader_task_done").select("task_id").eq("mobile", m.mobile).in("task_id", mine.map((t) => t.id));
+  const doneSet = new Set((done ?? []).map((d) => d.task_id));
+  return Promise.all(mine.map(async (t) => ({
+    id: t.id, title: t.title, description: t.description, due_date: t.due_date, created_at: t.created_at, level: t.level,
+    done: doneSet.has(t.id),
+    audio_url: t.audio_path ? (await db.storage.from("uploads").createSignedUrl(t.audio_path, 3600)).data?.signedUrl ?? null : null,
+  })));
+}
+
+/** Notifications for this member: by ward and district as before, and by level (Block Presidents only). */
+const noticeIsFor = (a: any, m: any) =>
+  (!a.audience || a.audience === "member" || (a.audience === "block" && m.block_no != null)) &&
+  (a.ward_no == null || a.ward_no === m.ward_no) &&
+  ((!a.district && !a.zone) || sameDistrict(a.district || a.zone, m));
+
+async function tasksForDate(mobile: string, date: string, member?: any) {
+  const { data: all } = await db.from("tasks").select("*").eq("task_date", date).order("sort");
+  const tasks = member ? (all ?? []).filter((t) => taskIsFor(t, member)) : all;
   const ids = (tasks ?? []).map((t) => t.id);
   const { data: media } = ids.length
     ? await db.from("media").select("task_id, kind").eq("mobile", mobile).in("task_id", ids)
@@ -184,15 +214,40 @@ Deno.serve(async (req) => {
         const { data: s, error } = await db.from("sessions").insert({ mobile }).select("token").single();
         if (error) throw error;
         if (!m.first_login_at) await db.from("members").update({ first_login_at: new Date().toISOString() }).eq("mobile", mobile);
-        profiles.push({ role: "member", token: s.token, name: m.name, ward_no: m.ward_no, ward_name: m.ward_name, district: memberDistrict(m), assembly: m.assembly });
+        profiles.push({ role: "member", token: s.token, name: m.name, ward_no: m.ward_no, ward_name: m.ward_name, district: memberDistrict(m), assembly: m.assembly, block_no: m.block_no ?? null, is_applicant: m.is_applicant !== false });
       }
       // token / role / leader / member keep older app versions working: they open the first profile.
       return json({ token: profiles[0].token, role: profiles[0].role, leader: ld ?? undefined, member: m ?? { name: ld.name, mobile, ward_no: 0 }, profiles });
     }
 
+    // ---- Account deletion asked from the public web page (no login). The admin checks it before deleting. ----
+    if (action === "delete_request_web") {
+      const mobile = digits10(body.mobile);
+      const name = clean(body.name, 80);
+      if (!mobile || !name) return json({ error: "name_and_mobile_required" }, 400);
+      const { data: open } = await db.from("deletion_requests").select("id").eq("mobile", mobile).eq("status", "pending").limit(1);
+      if (!open?.length) await db.from("deletion_requests").insert({ mobile, name, reason: clean(body.reason, 500), source: "web" });
+      return json({ ok: true });
+    }
+
     const member = await memberFromSession(req.headers.get("x-session"));
     if (!member) return json({ error: "unauthorized" }, 401);
     const mobile = member.mobile as string;
+
+    // ---- Account deletion asked from inside the app ----
+    if (action === "delete_request") {
+      const { data: open } = await db.from("deletion_requests").select("id, created_at").eq("mobile", mobile).eq("status", "pending").limit(1);
+      if (body.check) return json({ pending: !!open?.length, since: open?.[0]?.created_at ?? null });
+      if (!open?.length) await db.from("deletion_requests").insert({ mobile, name: member.name, reason: clean(body.reason, 500), source: "app" });
+      return json({ ok: true, pending: true });
+    }
+    if (action === "leader_task_done") {
+      const id = Number(body.task_id);
+      const mine = await leaderTasksFor(member);
+      if (!mine.some((t) => t.id === id)) return json({ error: "no_task" }, 404);
+      await db.from("leader_task_done").upsert({ task_id: id, mobile });
+      return json({ ok: true });
+    }
 
     // ---- Home: tasks for a date, latest leader message, social links ----
     if (action === "home") {
@@ -202,7 +257,7 @@ Deno.serve(async (req) => {
       const date = asked > today ? today : asked;
       const { data: dates } = await db.from("tasks").select("task_date").order("task_date");
       const days = [...new Set((dates ?? []).map((d) => d.task_date))];
-      const tasks = await tasksForDate(mobile, date);
+      const tasks = await tasksForDate(mobile, date, member);
       const { data: msg } = await db.from("leader_messages").select("*").lte("published_at", new Date().toISOString())
         .order("published_at", { ascending: false }).limit(1).maybeSingle();
       let leader = null;
@@ -212,14 +267,12 @@ Deno.serve(async (req) => {
       }
       const { data: allAnn } = await db.from("announcements").select("*")
         .order("created_at", { ascending: false }).limit(20);
-      const announcements = (allAnn ?? []).filter((a) =>
-        (a.ward_no == null || a.ward_no === member.ward_no) &&
-        ((!a.district && !a.zone) || sameDistrict(a.district || a.zone, member))
-      );
+      const announcements = (allAnn ?? []).filter((a) => noticeIsFor(a, member));
 
       const s = await settings();
       return json({
         member, today, date, days, tasks, leader, announcements,
+        leader_tasks: await leaderTasksFor(member),
         stats: await memberStats(mobile),
         points_rule: { ...POINTS, need_video: NEED.video, need_photo: NEED.photo },
         unread_inbox: (await db.from("inbox").select("id", { count: "exact", head: true }).eq("to_mobile", mobile).is("read_at", null)).count ?? 0,
@@ -272,7 +325,7 @@ Deno.serve(async (req) => {
       await db.from("media").insert({ mobile, task_id: taskId, kind, path, size_bytes: body.size ?? null });
       const tasks = await db.from("tasks").select("task_date").eq("id", taskId).maybeSingle();
       if (!tasks.data) return json({ error: "no_task" }, 404);
-      const list = await tasksForDate(mobile, tasks.data.task_date);
+      const list = await tasksForDate(mobile, tasks.data.task_date, member);
       return json({ task: list.find((x) => x.id === taskId) });
     }
 
@@ -288,7 +341,7 @@ Deno.serve(async (req) => {
       // The task is no longer complete in full, so its tick (and its 100 points) goes until the file is replaced.
       await db.from("completions").delete().eq("mobile", mobile).eq("task_id", taskId);
       const { data: t } = await db.from("tasks").select("task_date").eq("id", taskId).maybeSingle();
-      const list = t ? await tasksForDate(mobile, t.task_date) : [];
+      const list = t ? await tasksForDate(mobile, t.task_date, member) : [];
       return json({ task: list.find((x) => x.id === taskId) ?? null });
     }
 
@@ -525,22 +578,19 @@ Deno.serve(async (req) => {
     // ---- Reminder check, called by the phone periodically and on-demand ----
     if (action === "poll") {
       const today = istToday();
-      const tasks = await tasksForDate(mobile, today);
+      const tasks = await tasksForDate(mobile, today, member);
       const pending = tasks.filter((t) => t.kind === "upload" && !t.done).length;
       const since = body.since ? String(body.since) : new Date(Date.now() - 24 * 3600 * 1000).toISOString();
 
       // Find any tasks created for today after 'since'
       const { data: newTasks } = await db.from("tasks")
-        .select("id, kind, title, description, video_slots, link_x, link_facebook, link_instagram, link_whatsapp, task_date, created_at")
+        .select("id, kind, title, description, video_slots, link_x, link_facebook, link_instagram, link_whatsapp, task_date, created_at, audience")
         .eq("task_date", today)
         .gt("created_at", since)
         .order("created_at", { ascending: false });
 
       const { data: ann } = await db.from("announcements").select("*").gt("created_at", since).order("created_at");
-      const mine = (ann ?? []).filter((a) =>
-        (a.ward_no == null || a.ward_no === member.ward_no) &&
-        ((!a.district && !a.zone) || sameDistrict(a.district || a.zone, member)) &&
-        (!a.only_pending || pending > 0));
+      const mine = (ann ?? []).filter((a) => noticeIsFor(a, member) && (!a.only_pending || pending > 0));
       const { data: msg } = await db.from("leader_messages").select("id, title, published_at")
         .gt("published_at", since).lte("published_at", new Date().toISOString()).order("published_at", { ascending: false }).limit(1);
       const { data: newInbox } = await db.from("inbox").select("id, kind, text").eq("to_mobile", mobile).gt("created_at", since).limit(5);
@@ -549,7 +599,7 @@ Deno.serve(async (req) => {
         pending,
         new_inbox: newInbox ?? [],
         total: tasks.filter((t) => t.kind === "upload").length,
-        new_tasks: (newTasks ?? []).map((t) => ({ id: t.id, title: t.title, kind: t.kind, notify: taskNotice(t) })),
+        new_tasks: (newTasks ?? []).filter((t: any) => taskIsFor(t, member)).map((t) => ({ id: t.id, title: t.title, kind: t.kind, notify: taskNotice(t) })),
         announcements: mine,
         new_message: msg?.[0] ?? null,
         reminder_hours: s.reminder_hours,

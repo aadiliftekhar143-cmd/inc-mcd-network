@@ -111,6 +111,42 @@ Deno.serve(async (req) => {
       return json({ ok: true });
     }
 
+    // Delete an app account and everything stored for it (asked from the app or the public web page).
+    // POST { action: 'delete_account', request_id }
+    if (action === "delete_account") {
+      const { data: reqRow } = await db.from("deletion_requests").select("*").eq("id", Number(body.request_id)).maybeSingle();
+      if (!reqRow) return json({ error: "no_request" }, 404);
+      const mobile = String(reqRow.mobile);
+      // Files first: every stored path that belongs to this number.
+      const paths = new Set<string>();
+      const add = (p: unknown) => { if (typeof p === "string" && p) paths.add(p); };
+      const rowsOf = async (table: string, cols: string, col: string) => (await db.from(table).select(cols).eq(col, mobile).range(0, 9999)).data ?? [];
+      for (const r of await rowsOf("media", "path", "mobile")) add((r as any).path);
+      for (const r of await rowsOf("profile_requests", "photo_path", "mobile")) add((r as any).photo_path);
+      for (const r of await rowsOf("member_profiles", "photo_path", "mobile")) add((r as any).photo_path);
+      for (const r of await rowsOf("member_tasks", "media", "mobile")) for (const m of (r as any).media ?? []) add(m.path);
+      for (const r of await rowsOf("president_messages", "audio_path, media", "mobile")) { add((r as any).audio_path); for (const m of (r as any).media ?? []) add(m.path); }
+      for (const r of await rowsOf("field_reports", "audio_path, media", "mobile")) { add((r as any).audio_path); for (const m of (r as any).media ?? []) add(m.path); }
+      for (const r of await rowsOf("leader_broadcasts", "audio_path", "from_mobile")) add((r as any).audio_path);
+      for (const r of await rowsOf("leader_profile_requests", "photo_path", "mobile")) add((r as any).photo_path);
+      for (const r of await rowsOf("leaders", "photo_path", "mobile")) add((r as any).photo_path);
+      const list = [...paths];
+      for (let i = 0; i < list.length; i += 100) await db.storage.from("uploads").remove(list.slice(i, i + 100));
+      // Rows: most tables go with the member or leader row; these few are keyed by the number alone.
+      await db.from("president_messages").delete().eq("mobile", mobile);
+      await db.from("inbox").delete().eq("to_mobile", mobile);
+      await db.from("leader_task_done").delete().eq("mobile", mobile);
+      await db.from("member_feedback").delete().eq("member_mobile", mobile);
+      await db.from("leader_calls").delete().eq("to_mobile", mobile);
+      const m = await db.from("members").delete().eq("mobile", mobile).select("mobile");
+      const l = await db.from("leaders").delete().eq("mobile", mobile).select("mobile");
+      if (m.error) throw m.error;
+      if (l.error) throw l.error;
+      const { data: who } = await db.auth.admin.getUserById(userId);
+      await db.from("deletion_requests").update({ status: "done", processed_at: new Date().toISOString(), processed_by: who?.user?.email ?? "admin" }).eq("id", reqRow.id);
+      return json({ ok: true, files: list.length, member: (m.data ?? []).length, leader: (l.data ?? []).length });
+    }
+
     return json({ error: "unknown_action" }, 400);
   } catch (e) {
     console.error(e);
