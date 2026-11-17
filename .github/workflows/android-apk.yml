@@ -40,9 +40,13 @@ jobs:
           ARGS=""
           if [ -n "$WS_API_URL" ]; then ARGS="$ARGS -PWS_API_URL=$WS_API_URL -PWS_ANON_KEY=$WS_ANON_KEY"; fi
           if [ -n "$FCM_APP_ID" ]; then ARGS="$ARGS -PFCM_APP_ID=$FCM_APP_ID -PFCM_API_KEY=$FCM_API_KEY -PFCM_PROJECT_ID=$FCM_PROJECT_ID -PFCM_SENDER_ID=$FCM_SENDER_ID"; fi
-          gradle assembleRelease $ARGS
+          gradle assembleRelease bundleRelease $ARGS
       - uses: actions/upload-artifact@v4
-        with: { name: ward-sadasya-apk, path: android/app/build/outputs/apk/release/*.apk }
+        with:
+          name: inc-mcd-network-release
+          path: |
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/bundle/release/*.aab
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -57,7 +61,9 @@ jobs:
             - ऑब्ज़र्वर: विज़िट रिपोर्ट में वार्ड और काम चुनें, फोटो वीडियो चुनते ही अपलोड; हर सदस्य पर महीने का फ़ीडबैक
             - अध्यक्ष: लोगों के संदेश हफ़्ते के हिसाब से, ब्लॉक का प्रदर्शन, नाम और फोटो बदलना
             - सभी पदाधिकारी अपनी प्रोफ़ाइल एडिट कर सकते हैं; इनबॉक्स का लाल निशान पढ़ते ही हटता है
-            - नया फ़ॉन्ट, मेन्यू से प्रोफ़ाइल बदलना, गोपनीयता नीति और खाता हटाने का विकल्प
-          files: android/app/build/outputs/apk/release/*.apk
+            - नया फ़ॉन्ट, मेन्यू से प्रोफ़ाइल बदलना, मेन्यू के नीचे Privacy Policy का लिंक
+          files: |
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/bundle/release/*.aab
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

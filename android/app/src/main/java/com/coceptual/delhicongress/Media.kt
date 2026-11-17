@@ -1,4 +1,4 @@
-package com.coceptual.wardsadasya
+package com.coceptual.delhicongress
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -337,52 +337,6 @@ internal fun PresidentTaskLine(modifier: Modifier = Modifier) {
     }
 }
 
-/** Asks for the account and its data to be deleted. The office confirms by a call before it is removed. */
-@Composable
-internal fun DeleteAccountDialog(leader: Boolean, onDismiss: () -> Unit) {
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var reason by remember { mutableStateOf("") }
-    var busy by remember { mutableStateOf(false) }
-    var sent by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        try { sent = (if (leader) Api.leader(ctx, "delete_request", JSONObject().put("check", true)) else Api.call(ctx, "delete_request", JSONObject().put("check", true))).optBoolean("pending") } catch (_: Exception) {}
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Filled.DeleteForever, null, tint = Color(0xFFB42318)) },
-        title = { Text(if (sent) "अनुरोध भेजा जा चुका है" else "खाता हटाएं", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (sent) Text("आपका खाता हटाने का अनुरोध कार्यालय के पास है। पुष्टि के लिए आपको कॉल आएगी, उसके बाद खाता और उसका पूरा डेटा हटा दिया जाएगा।", fontSize = 14.sp, lineHeight = 21.sp)
-                else {
-                    Text("खाता हटाने पर आपका लॉगिन, प्रोफ़ाइल, अंक, अपलोड किए फोटो और वीडियो, और संदेश हमेशा के लिए हट जाएंगे। यह वापस नहीं हो सकता।", fontSize = 14.sp, lineHeight = 21.sp)
-                    Text("कार्यालय पुष्टि के लिए आपको कॉल करेगा, उसके बाद खाता हटेगा।", fontSize = 13.sp, color = Color(0xFF6B7590), lineHeight = 19.sp)
-                    OutlinedTextField(reason, { reason = it.take(500) }, label = { Text("कारण (चाहें तो लिखें)") }, modifier = Modifier.fillMaxWidth(), minLines = 2, shape = RoundedCornerShape(12.dp))
-                }
-            }
-        },
-        confirmButton = {
-            if (sent) Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0E1B3D))) { Text("ठीक है") }
-            else Button(
-                onClick = {
-                    busy = true
-                    scope.launch {
-                        try {
-                            val p = JSONObject().put("reason", reason.trim())
-                            if (leader) Api.leader(ctx, "delete_request", p) else Api.call(ctx, "delete_request", p)
-                            sent = true
-                        } catch (e: Exception) { Toast.makeText(ctx, "भेजा नहीं जा सका, इंटरनेट चेक करें", Toast.LENGTH_LONG).show() }
-                        busy = false
-                    }
-                },
-                enabled = !busy, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB42318)),
-            ) { Text(if (busy) "भेजा जा रहा है…" else "हटाने का अनुरोध भेजें", fontWeight = FontWeight.Bold) }
-        },
-        dismissButton = { if (!sent) TextButton(onClick = onDismiss) { Text("रहने दें") } },
-    )
-}
-
 /** One picked photo or video. It starts uploading as soon as it is picked; path is set once it is on the server. */
 internal class Attachment(val kind: String, val uri: Uri) {
     var path by mutableStateOf<String?>(null)
@@ -476,6 +430,11 @@ internal fun SideMenu(name: String, sub: String, items: List<MenuItem>, photo: S
                 }
             }
         }
-        Text("$APP_NAME · v${BuildConfig.VERSION_NAME}", fontSize = 12.sp, color = Color(0xFF6B7590), modifier = Modifier.padding(20.dp))
+        val menuCtx = LocalContext.current
+        Text("$APP_NAME · v${BuildConfig.VERSION_NAME}", fontSize = 12.sp, color = Color(0xFF6B7590), modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp))
+        Text("Privacy Policy", fontSize = 12.5.sp, color = Color(0xFF2463D1), fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(start = 12.dp, bottom = 12.dp).clip(RoundedCornerShape(8.dp))
+                .clickable { close(); try { menuCtx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_URL))) } catch (_: Exception) {} }
+                .padding(horizontal = 8.dp, vertical = 8.dp))
     }
 }

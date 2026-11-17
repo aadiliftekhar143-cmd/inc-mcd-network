@@ -1,4 +1,4 @@
-package com.coceptual.wardsadasya
+package com.coceptual.delhicongress
 
 import android.Manifest
 import android.app.Activity
@@ -95,8 +95,6 @@ internal fun LeaderApp(role: String, onLogout: () -> Unit, others: List<JSONObje
     // Unread inbox count, kept on its own so the red dot appears and clears without reloading everything.
     var unread by remember { mutableIntStateOf(0) }
     var meKey by remember { mutableIntStateOf(0) }
-    var askDelete by remember { mutableStateOf(false) }
-    if (askDelete) DeleteAccountDialog(leader = true) { askDelete = false }
     LaunchedEffect(meKey) {
         if (meKey > 0) try { val m = Api.leader(ctx, "me"); me = m; unread = m.optInt("unread_inbox") } catch (_: Exception) {}
     }
@@ -204,8 +202,6 @@ internal fun LeaderApp(role: String, onLogout: () -> Unit, others: List<JSONObje
         // The President sends; nobody above him writes to his inbox. What people send him is under "लोगों के संदेश".
         if (role != "president") add(Triple(Icons.Filled.MarkEmailUnread, "मेरा इनबॉक्स") { stack.add(Page("inbox")) })
         add(Triple(Icons.Filled.Person, "मेरी प्रोफ़ाइल") { stack.add(Page("profile")) })
-        add(Triple(Icons.Filled.PrivacyTip, "गोपनीयता नीति") { openLink(ctx, PRIVACY_URL) })
-        add(Triple(Icons.Filled.DeleteForever, "खाता हटाएं") { askDelete = true })
         add(Triple(Icons.AutoMirrored.Filled.Logout, "लॉगआउट") { onLogout() })
     }
 
@@ -873,6 +869,16 @@ private fun ReportsTab(lc: LeaderCtx) {
     LatestReports(lc, 30)
 }
 
+/**
+ * The month the feedback is about, e.g. "अक्टूबर 2026". The server names it; if it has not (older server),
+ * it is worked out here as the month before this one, so the heading is never left half empty.
+ */
+private fun feedbackMonthLabel(lc: LeaderCtx): String =
+    monthLabel(lc.ov.optJSONObject("feedback")?.str("month")).ifBlank {
+        val c = java.util.Calendar.getInstance().apply { set(java.util.Calendar.DAY_OF_MONTH, 1); add(java.util.Calendar.MONTH, -1) }
+        "${HI_MONTHS[c.get(java.util.Calendar.MONTH)]} ${c.get(java.util.Calendar.YEAR)}"
+    }
+
 /** Members still waiting for this observer's monthly feedback. */
 private fun feedbackLeft(lc: LeaderCtx): Pair<String, Int> {
     val f = lc.ov.optJSONObject("feedback") ?: return "" to 0
@@ -900,11 +906,13 @@ private fun FeedbackReminder(lc: LeaderCtx) {
 private fun FeedbackTab(lc: LeaderCtx) {
     val f = lc.ov.optJSONObject("feedback")
     val done = f?.optJSONArray("done")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
-    val month = monthLabel(f?.str("month"))
+    val month = feedbackMonthLabel(lc)
+    // Whose feedback this is: the observer's own assembly, then the month.
+    val place = lc.me.str("assembly")?.let { "$it · " } ?: ""
     val order = mapOf("never" to 0, "inactive" to 1, "slow" to 2, "active" to 3)
     val ms = lc.ov.optJSONArray("members").list().filter { it.optBoolean("is_applicant", true) }
         .sortedWith(compareBy({ if (it.optString("mobile") in done) 1 else 0 }, { order[it.optString("status")] ?: 0 }, { it.optInt("points") }))
-    LCard("$month का फ़ीडबैक", action = { Text("${ms.count { it.optString("mobile") in done }}/${ms.size} दिया", fontSize = 12.5.sp, color = Muted, fontWeight = FontWeight.SemiBold) }) {
+    LCard("$place$month का फ़ीडबैक", action = { Text("${ms.count { it.optString("mobile") in done }}/${ms.size} दिया", fontSize = 12.5.sp, color = Muted, fontWeight = FontWeight.SemiBold) }) {
         Text("महीने में एक बार हर सदस्य के बारे में लिखें: ज़मीन पर आपने क्या देखा। $month का फ़ीडबैक इस पूरे महीने दिया जा सकता है।", fontSize = 13.sp, color = Ink, lineHeight = 20.sp)
         TextButton(onClick = { lc.goTab(2) }, contentPadding = PaddingValues(0.dp)) { Text("फ़ीडबैक देने से पहले अपनी विज़िट रिपोर्ट देख लें") }
     }
@@ -926,7 +934,7 @@ private fun FeedbackForm(member: JSONObject, lc: LeaderCtx) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val mobile = member.optString("mobile")
-    val month = monthLabel(lc.ov.optJSONObject("feedback")?.str("month"))
+    val month = feedbackMonthLabel(lc)
     val flags = remember(mobile) { mutableStateListOf<String>() }
     var note by remember(mobile) { mutableStateOf("") }
     var voice by remember(mobile) { mutableStateOf<File?>(null) }

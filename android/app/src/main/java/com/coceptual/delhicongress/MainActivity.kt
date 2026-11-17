@@ -1,4 +1,4 @@
-package com.coceptual.wardsadasya
+package com.coceptual.delhicongress
 
 import android.Manifest
 import android.app.Activity
@@ -729,8 +729,6 @@ internal fun HomeScreen(
         else -> "वार्ड ${member.optInt("ward_no")}"
     }
     val leaderTasks = remember(d) { d.optJSONArray("leader_tasks")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } } ?: emptyList() }
-    var askDelete by remember { mutableStateOf(false) }
-    if (askDelete) DeleteAccountDialog(leader = false) { askDelete = false }
 
     BackHandler(enabled = drawer.isOpen) { scope.launch { drawer.close() } }
     ModalNavigationDrawer(
@@ -745,8 +743,6 @@ internal fun HomeScreen(
                     MenuItem(Icons.Filled.AddTask, "अपना टास्क जोड़ें") { onMenu("own") },
                     MenuItem(Icons.Filled.RecordVoiceOver, "अध्यक्ष जी को संदेश भेजें") { onMenu("president") },
                     MenuItem(Icons.Filled.Person, "प्रोफ़ाइल एडिट करें") { onMenu("profile") },
-                    MenuItem(Icons.Filled.PrivacyTip, "गोपनीयता नीति") { openLink(ctx, PRIVACY_URL) },
-                    MenuItem(Icons.Filled.DeleteForever, "खाता हटाएं") { askDelete = true },
                     MenuItem(Icons.AutoMirrored.Filled.Logout, "लॉगआउट", danger = true) { onLogout() },
                 ),
                 close = { scope.launch { drawer.close() } },

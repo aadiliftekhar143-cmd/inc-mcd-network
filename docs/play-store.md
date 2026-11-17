@@ -1,6 +1,6 @@
 # Google Play: what to fill in for INC MCD NETWORK
 
-Everything below goes in Play Console under **Policy and programs > App content**. The answers match what the app (v2.1) really does. If the app changes what it collects, change these answers too.
+Everything below goes in Play Console under **Policy and programs > App content**. The answers match what the app (v2.2) really does. If the app changes what it collects, change these answers too.
 
 ## Links to paste
 
@@ -9,7 +9,7 @@ Everything below goes in Play Console under **Policy and programs > App content*
 | Privacy policy | https://congressdelhinetwork.com/privacy |
 | Account deletion (Data safety form asks for this) | https://congressdelhinetwork.com/delete-account |
 
-Account deletion also exists inside the app: Menu > खाता हटाएं, on every login level. Requests from both places land in the admin panel under **People > Account deletion**. Google's rule is that the request must be acted on, so check that tab regularly.
+The app reaches the same page from inside: Menu > Privacy Policy (bottom of the menu) > Delete my account. There is no separate delete button in the app; if Google review asks for one, it can be added back. Requests land in the admin panel under **People > Account deletion**. Google's rule is that the request must be acted on, so check that tab regularly.
 
 ## Data safety form
 
@@ -76,6 +76,6 @@ Camera and gallery are opened through Android's own picker, so no camera or medi
 
 ## Before submitting
 
-1. In admin **Settings**, set the app version code to 12 and the version name to 2.1, so older installs are told to update.
-2. Play needs a signed app bundle (.aab), not the APK from GitHub. The build workflow makes an APK today; the developer has to add a bundle build with the same keystore.
+1. In admin **Settings**, set the app version code to 13 and the version name to 2.2, so older installs are told to update.
+2. Play needs a signed app bundle (.aab). The build workflow now makes one next to the APK; it is in the GitHub release.
 3. Organisation accounts are needed for some app types. If the Play account is a personal one and Google objects, the fix is an organisation account in the name of Coceptual Media or DPCC.

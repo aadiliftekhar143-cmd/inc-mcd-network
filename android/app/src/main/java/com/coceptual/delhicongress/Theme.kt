@@ -1,4 +1,4 @@
-package com.coceptual.wardsadasya
+package com.coceptual.delhicongress
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.font.Font

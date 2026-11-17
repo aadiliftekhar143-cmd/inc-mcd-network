@@ -106,7 +106,7 @@ ward-sadasya/
 │   ├── src/                    # Dashboard, Tasks, Members, Messages, Reminders
 │   └── .env.example
 ├── android/                    # Kotlin + Compose member app
-│   ├── app/src/main/java/com/coceptual/wardsadasya/
+│   ├── app/src/main/java/com/coceptual/delhicongress/
 │   │   ├── MainActivity.kt     # all screens and navigation
 │   │   ├── Api.kt              # API client, streaming uploader, session store
 │   │   └── ReminderWorker.kt   # background check-ins and notifications
