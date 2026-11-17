@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.coceptual.wardsadasya"
+    namespace = "com.coceptual.delhicongress"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.coceptual.wardsadasya"
+        applicationId = "com.coceptual.delhicongress"
         minSdk = 24
         targetSdk = 34
         versionCode = 11

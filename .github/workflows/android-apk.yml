@@ -40,9 +40,13 @@ jobs:
           ARGS=""
           if [ -n "$WS_API_URL" ]; then ARGS="$ARGS -PWS_API_URL=$WS_API_URL -PWS_ANON_KEY=$WS_ANON_KEY"; fi
           if [ -n "$FCM_APP_ID" ]; then ARGS="$ARGS -PFCM_APP_ID=$FCM_APP_ID -PFCM_API_KEY=$FCM_API_KEY -PFCM_PROJECT_ID=$FCM_PROJECT_ID -PFCM_SENDER_ID=$FCM_SENDER_ID"; fi
-          gradle assembleRelease $ARGS
+          gradle assembleRelease bundleRelease $ARGS
       - uses: actions/upload-artifact@v4
-        with: { name: ward-sadasya-apk, path: android/app/build/outputs/apk/release/*.apk }
+        with:
+          name: inc-mcd-network-release
+          path: |
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/bundle/release/*.aab
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -57,6 +61,8 @@ jobs:
             - मेरे अंक: नियम अलग, और अब तक का आपका काम अलग (शेयर, टास्क, आपके बनाए टास्क, कितने दिन से जुड़े)
             - वॉइस नोट: रिकॉर्डिंग शुरू होने की सूचना, और रिकॉर्डिंग चलते हुए संदेश नहीं जाएगा
             - अध्यक्ष जी को संदेश में फोटो और वीडियो; प्रोफ़ाइल में जन्म तिथि, लिंग, वैवाहिक स्थिति, सोशल मीडिया लिंक
-          files: android/app/build/outputs/apk/release/*.apk
+          files: |
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/bundle/release/*.aab
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

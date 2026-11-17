@@ -1,4 +1,4 @@
-package com.coceptual.wardsadasya
+package com.coceptual.delhicongress
 
 import android.content.Context
 import android.net.Uri
