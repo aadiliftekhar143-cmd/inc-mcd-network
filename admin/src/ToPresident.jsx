@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { supabase, fetchAll, fmt, timeAgo, wardLabel, istDate } from './lib.js';
+import { supabase, fetchAll, fmt, timeAgo, wardLabel, istDate, istToday, dayLabel } from './lib.js';
 import { BarChart3, MessageCircle } from './icons.jsx';
 
 // Topics the analysis looks for, by Hindi and English keywords.
@@ -40,10 +40,12 @@ export default function ToPresident() {
   const [rows, setRows] = useState([]);
   const [files, setFiles] = useState({});
   const [topic, setTopic] = useState('all');
+  const [range, setRange] = useState('7');   // '7' = last 7 days, 'all', or one date (YYYY-MM-DD)
+  const [shown, setShown] = useState(40);
   useEffect(() => { (async () => {
     const list = await fetchAll('president_messages', '*', (q) => q.order('created_at', { ascending: false }));
     setRows(list);
-    const paths = list.slice(0, 150).flatMap((r) => [r.audio_path, ...(r.media || []).map((m) => m.path)]).filter(Boolean);
+    const paths = list.slice(0, 400).flatMap((r) => [r.audio_path, ...(r.media || []).map((m) => m.path)]).filter(Boolean);
     if (paths.length) {
       const { data } = await supabase.storage.from('uploads').createSignedUrls(paths, 3600);
       setFiles(Object.fromEntries((data || []).filter((d) => d.signedUrl).map((d) => [d.path, d.signedUrl])));
@@ -60,7 +62,12 @@ export default function ToPresident() {
   const days = [...Array(14)].map((_, i) => istDate(new Date(Date.now() - (13 - i) * 86400000).toISOString()));
   const perDay = days.map((d) => [d.slice(5), tagged.filter((r) => istDate(r.created_at) === d).length]);
   const week = tagged.filter((r) => Date.now() - new Date(r.created_at).getTime() < 7 * 86400000);
-  const list = tagged.filter((r) => topic === 'all' || r.topics.includes(topic));
+  const inRange = (r) => range === 'all' || (range === '7' ? Date.now() - new Date(r.created_at).getTime() < 7 * 86400000 : istDate(r.created_at) === range);
+  const list = tagged.filter((r) => (topic === 'all' || r.topics.includes(topic)) && inRange(r));
+  const byDay = Object.entries(list.slice(0, shown).reduce((g, r) => { (g[istDate(r.created_at)] ||= []).push(r); return g; }, {}));
+  const ROLE = { member: 'Ward members', observer: 'Observers', dp: 'District Presidents', gs: 'General Secretary', dc: 'District Coordinators' };
+  const hours = [['Morning (6 to 12)', 6, 12], ['Afternoon (12 to 5)', 12, 17], ['Evening (5 to 9)', 17, 21], ['Night (9 to 6)', 21, 30]]
+    .map(([l, a, b]) => [l, tagged.filter((r) => { const h = (new Date(r.created_at).getUTCHours() + 5.5) % 24; const x = h < 6 ? h + 24 : h; return x >= a && x < b; }).length]);
 
   return (
     <>
@@ -73,21 +80,38 @@ export default function ToPresident() {
       <section className="card">
         <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}><BarChart3 size={18} />What people are writing about</h2>
         <p className="sub">Messages to the DPCC President from ward members and observers, sorted into topics and tone by keywords. Set your own tag on any message; the President sees that tag in his app.</p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(300px,1fr))', gap: 20, marginTop: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: 20, marginTop: 10 }}>
           <div><b>Topics</b><Bars items={counts((r) => r.topics)} /></div>
           <div><b>Tone</b><Bars items={counts((r) => TONE[r.tone][0])} /></div>
           <div><b>By district</b><Bars items={counts((r) => r.district || 'Not known').slice(0, 14)} /></div>
           <div><b>Last 14 days</b><Bars items={perDay} /></div>
+          <div><b>Who is writing</b><Bars items={counts((r) => ROLE[r.sender_role] || 'Others')} />
+            <div style={{ marginTop: 12 }}><b>Written or spoken</b><Bars items={[['Text', tagged.filter((r) => r.text).length], ['Voice note', tagged.filter((r) => r.audio_path).length], ['With photo or video', tagged.filter((r) => (r.media || []).length).length]]} /></div></div>
+          <div><b>Top assemblies</b><Bars items={counts((r) => r.assembly || 'Not known').slice(0, 8)} />
+            <div style={{ marginTop: 12 }}><b>Time of day</b><Bars items={hours} /></div></div>
         </div>
       </section>
       <section className="card">
         <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 10 }}>
           <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}><MessageCircle size={18} />Messages</h2>
-          <select value={topic} onChange={(e) => setTopic(e.target.value)} style={{ maxWidth: 240 }}>
-            <option value="all">All topics</option>{counts((r) => r.topics).map(([k, v]) => <option key={k} value={k}>{k} ({v})</option>)}
-          </select>
+          <div className="filters">
+            <div className="seg">
+              <button className={range === '7' ? 'on' : ''} onClick={() => { setRange('7'); setShown(40); }}>Last 7 days</button>
+              <button className={range === istToday() ? 'on' : ''} onClick={() => { setRange(istToday()); setShown(40); }}>Today</button>
+              <button className={range === 'all' ? 'on' : ''} onClick={() => { setRange('all'); setShown(40); }}>All</button>
+            </div>
+            <label htmlFor="pmdate">Date</label>
+            <input id="pmdate" type="date" max={istToday()} value={/^\d{4}-/.test(range) ? range : ''} onChange={(e) => { setRange(e.target.value || '7'); setShown(40); }} />
+            <select value={topic} onChange={(e) => setTopic(e.target.value)} style={{ maxWidth: 220 }}>
+              <option value="all">All topics</option>{counts((r) => r.topics).map(([k, v]) => <option key={k} value={k}>{k} ({v})</option>)}
+            </select>
+          </div>
         </div>
-        {list.map((r) => (
+        <p className="muted" style={{ fontSize: 13, margin: '8px 0 0' }}>{fmt(list.length)} messages {range === '7' ? 'in the last 7 days' : range === 'all' ? 'in all' : 'on ' + dayLabel(range)}</p>
+        {byDay.map(([d, rs]) => (<React.Fragment key={d}>
+          <h3 className="daybar">{dayLabel(d)}{d === istToday() ? ' · Today' : ''}<span>{rs.length} messages</span></h3>
+          {rs.map((r) => (
+
           <div key={r.id} style={{ borderTop: '1px solid #E3E6EB', padding: '12px 0' }}>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
               <b>{r.sender_name || r.mobile}</b>
@@ -106,7 +130,9 @@ export default function ToPresident() {
                 : <a key={m.path} href={files[m.path]} target="_blank" rel="noreferrer"><img src={files[m.path]} alt="" style={{ width: 120, height: 90, objectFit: 'cover', borderRadius: 8 }} /></a>))}
             </div>}
           </div>))}
-        {!list.length && <p className="muted">No messages yet.</p>}
+        </React.Fragment>))}
+        {list.length > shown && <button className="btn ghost" style={{ marginTop: 12 }} onClick={() => setShown(shown + 40)}>Show {Math.min(40, list.length - shown)} more</button>}
+        {!list.length && <p className="muted">{rows.length ? 'No messages for this date or topic.' : 'No messages yet.'}</p>}
       </section>
     </>
   );

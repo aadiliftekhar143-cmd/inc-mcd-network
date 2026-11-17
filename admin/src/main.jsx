@@ -18,16 +18,18 @@ import MemberTasks from './MemberTasks.jsx';
 import ToPresident from './ToPresident.jsx';
 import Posters from './Posters.jsx';
 import DataIssues from './DataIssues.jsx';
+import ObserverReports from './ObserverReports.jsx';
+import Deletions from './Deletions.jsx';
 import { TriangleAlert, BarChart3, ClipboardList, Users, UserCheck, Phone, Bell, MessageCircle, ImageIcon, SettingsIcon } from './icons.jsx';
-import { FileText, ListChecks, Network, Video, LogOut } from 'lucide-react';
+import { FileText, ListChecks, Network, Video, LogOut, ClipboardCheck, UserX } from 'lucide-react';
 
 const APP_NAME = 'INC MCD NETWORK';
 
 // Sidebar groups for the admin. Each entry: [id, label, icon].
 const ADMIN_GROUPS = [
   ['Overview', [['dashboard', 'Analytics', BarChart3], ['reports', 'Reports', FileText]]],
-  ['Field work', [['tasks', 'Tasks', ClipboardList], ['membertasks', 'Member tasks', ListChecks], ['leaders', 'Leaders', Network]]],
-  ['People', [['members', 'Ward members', Users], ['profiles', 'Profile updates', UserCheck], ['calling', 'Calling', Phone], ['dataissues', 'Data discrepancies', TriangleAlert], ['team', 'Team', ShieldCheck]]],
+  ['Field work', [['tasks', 'Tasks', ClipboardList], ['membertasks', 'Member tasks', ListChecks], ['leaders', 'Leaders', Network], ['observerreports', 'Observer reports', ClipboardCheck]]],
+  ['People', [['members', 'Ward members', Users], ['profiles', 'Profile updates', UserCheck], ['calling', 'Calling', Phone], ['dataissues', 'Data discrepancies', TriangleAlert], ['team', 'Team', ShieldCheck], ['deletions', 'Account deletion', UserX]]],
   ['Communication', [['messages', 'Leader messages', Video], ['reminders', 'Notifications', Bell], ['topresident', 'Messages to President', MessageCircle], ['posters', 'Posters', ImageIcon]]],
   ['Setup', [['settings', 'Settings', SettingsIcon]]],
 ];
@@ -163,7 +165,7 @@ function Login() {
 
             <a href="/download" className="login-apk-link">
               <Download size={15} />
-              <span>Android App (v2.0 APK) डाउनलोड करें</span>
+              <span>Android App (v2.2 APK) डाउनलोड करें</span>
             </a>
           </div>
         </div>
@@ -339,6 +341,8 @@ function App() {
         {tab === 'topresident' && <ToPresident />}
         {tab === 'posters' && <Posters />}
         {tab === 'dataissues' && <DataIssues />}
+        {tab === 'observerreports' && <ObserverReports />}
+        {tab === 'deletions' && <Deletions />}
         {tab === 'settings' && <Settings />}
       </main>
       <Footer />

@@ -43,6 +43,7 @@ import java.io.File
 internal val ROLE_HI = mapOf(
     "president" to "माननीय अध्यक्ष, DPCC",
     "gs" to "महासचिव",
+    "dc" to "ज़िला कोऑर्डिनेटर",
     "dp" to "ज़िला अध्यक्ष",
     "observer" to "विधानसभा ऑब्ज़र्वर",
     "member" to "वार्ड सदस्य",
@@ -307,25 +308,118 @@ internal fun rememberCaller(askResult: Boolean = true, onLogged: () -> Unit = {}
 }
 
 /** One row in the side menu. */
-internal class MenuItem(val icon: androidx.compose.ui.graphics.vector.ImageVector, val label: String, val badge: Int = 0, val danger: Boolean = false, val onClick: () -> Unit)
+internal class MenuItem(val icon: androidx.compose.ui.graphics.vector.ImageVector, val label: String, val badge: Int = 0, val danger: Boolean = false, val highlight: Boolean = false, val onClick: () -> Unit)
+
+/** Name of one stored profile, for the switch button: the post and where. */
+internal fun profileLabel(p: JSONObject): String = when (p.optString("role")) {
+    "member" -> if (p.optBoolean("is_applicant", true)) "वार्ड सदस्य" else "ब्लॉक अध्यक्ष"
+    "observer" -> "विधानसभा ऑब्ज़र्वर"
+    else -> ROLE_HI[p.optString("role")] ?: p.optString("role")
+}
+internal fun profileWhere(p: JSONObject): String = when (p.optString("role")) {
+    "member" -> if (p.optBoolean("is_applicant", true)) "वार्ड ${p.optInt("ward_no")}" + (if (!p.isNull("block_no")) " · ब्लॉक अध्यक्ष, ब्लॉक ${p.optInt("block_no")}" else "") else "ब्लॉक ${p.optInt("block_no")}"
+    "observer" -> p.optString("assembly").takeIf { it.isNotBlank() && it != "null" } ?: ""
+    "dp", "dc" -> p.optString("district").takeIf { it.isNotBlank() && it != "null" } ?: ""
+    else -> "पूरी दिल्ली"
+}
+
+internal const val PRIVACY_URL = "https://congressdelhinetwork.com/privacy"
+
+/** The bold line shown on every task that comes from the President, at every level. */
+@Composable
+internal fun PresidentTaskLine(modifier: Modifier = Modifier) {
+    Row(
+        modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFFFFF1E4)).border(1.dp, Color(0xFFF6C9A0), RoundedCornerShape(12.dp)).padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.Campaign, null, tint = Color(0xFFF2852B), modifier = Modifier.size(22.dp))
+        Text("यह टास्क प्रदेश कांग्रेस अध्यक्ष देवेंद्र यादव जी की तरफ़ से आया है।", fontSize = 15.5.sp, lineHeight = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF9A4A0B), modifier = Modifier.padding(start = 10.dp))
+    }
+}
+
+/** One picked photo or video. It starts uploading as soon as it is picked; path is set once it is on the server. */
+internal class Attachment(val kind: String, val uri: Uri) {
+    var path by mutableStateOf<String?>(null)
+    var failed by mutableStateOf(false)
+}
+
+/**
+ * Photo and video buttons with the list of picked files. Each file uploads the moment it is picked,
+ * so by the time the person presses send there is nothing left to wait for.
+ */
+@Composable
+internal fun AttachBox(items: androidx.compose.runtime.snapshots.SnapshotStateList<Attachment>, leader: Boolean, max: Int = 8, purpose: String? = null) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    fun start(a: Attachment) {
+        a.failed = false
+        scope.launch {
+            try { a.path = uploadUri(ctx, leader, a.uri, a.kind, purpose) } catch (e: Exception) { a.failed = true }
+        }
+    }
+    fun add(kind: String, uris: List<Uri>) {
+        val room = (max - items.size).coerceAtLeast(0)
+        if (uris.size > room) Toast.makeText(ctx, "ज़्यादा से ज़्यादा $max फ़ाइलें जोड़ सकते हैं", Toast.LENGTH_SHORT).show()
+        uris.take(room).forEach { u -> val a = Attachment(kind, u); items.add(a); start(a) }
+    }
+    val pickPhotos = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { us -> add("photo", us) }
+    val pickVideos = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { us -> add("video", us) }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(onClick = { pickPhotos.launch("image/*") }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp), enabled = items.size < max) { Icon(Icons.Filled.PhotoCamera, null); Text(" फोटो") }
+        OutlinedButton(onClick = { pickVideos.launch("video/*") }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp), enabled = items.size < max) { Icon(Icons.Filled.Videocam, null); Text(" वीडियो") }
+    }
+    items.forEachIndexed { i, a ->
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color.White).border(1.dp, Color(0xFFE3E7EF), RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(if (a.kind == "video") Icons.Filled.Videocam else Icons.Filled.Image, null, tint = Color(0xFF0E1B3D), modifier = Modifier.size(20.dp))
+            Column(Modifier.padding(start = 10.dp).weight(1f)) {
+                Text((if (a.kind == "video") "वीडियो" else "फोटो") + " ${i + 1}", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF141C33))
+                Text(
+                    when { a.path != null -> "अपलोड हो गया"; a.failed -> "अपलोड नहीं हुआ"; else -> "अपलोड हो रहा है…" },
+                    fontSize = 12.sp, color = when { a.path != null -> Color(0xFF14613A); a.failed -> Color(0xFF9B1C1C); else -> Color(0xFF2463D1) },
+                )
+            }
+            when {
+                a.path != null -> Icon(Icons.Filled.CheckCircle, null, tint = Color(0xFF12884A), modifier = Modifier.size(20.dp))
+                a.failed -> TextButton(onClick = { start(a) }) { Text("फिर कोशिश करें") }
+                else -> CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color(0xFF2463D1))
+            }
+            IconButton(onClick = { items.remove(a) }, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Close, "हटाएं", tint = Color(0xFF9B1C1C), modifier = Modifier.size(18.dp)) }
+        }
+    }
+}
 
 /** The panel that slides in from the left: who is logged in, then the menu. */
 @Composable
-internal fun SideMenu(name: String, sub: String, items: List<MenuItem>, close: () -> Unit) {
+internal fun SideMenu(name: String, sub: String, items: List<MenuItem>, photo: String? = null, close: () -> Unit) {
     val navy = Color(0xFF0E1B3D)
     ModalDrawerSheet(drawerContainerColor = Color.White, drawerShape = RoundedCornerShape(topEnd = 20.dp, bottomEnd = 20.dp), modifier = Modifier.fillMaxWidth(0.82f)) {
         Column(Modifier.fillMaxWidth().background(navy).padding(start = 20.dp, end = 16.dp, top = 28.dp, bottom = 20.dp)) {
-            androidx.compose.foundation.Image(
+            if (photo != null) coil.compose.AsyncImage(
+                model = photo, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.size(56.dp).clip(CircleShape).background(Color.White),
+            ) else androidx.compose.foundation.Image(
                 androidx.compose.ui.res.painterResource(R.drawable.logo), contentDescription = null,
                 modifier = Modifier.size(52.dp).clip(CircleShape).background(Color.White),
             )
-            Text(name, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp), maxLines = 1)
-            Text(sub, color = Color(0xFFAFC0E3), fontSize = 13.sp, maxLines = 1)
+            Text(name, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp), maxLines = 2)
+            Text(sub, color = Color(0xFFAFC0E3), fontSize = 13.sp, maxLines = 2, lineHeight = 18.sp)
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(vertical = 8.dp)) {
             items.forEach { it ->
                 if (it.danger) HorizontalDivider(color = Color(0xFFE3E7EF), modifier = Modifier.padding(vertical = 6.dp))
-                Row(
+                // A highlighted row (switching to the other profile) sits in its own orange box so it can't be missed.
+                if (it.highlight) Row(
+                    Modifier.padding(horizontal = 12.dp, vertical = 6.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFFF2852B))
+                        .clickable { close(); it.onClick() }.padding(horizontal = 14.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(it.icon, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                    Text(it.label, fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.padding(start = 12.dp).weight(1f))
+                    Icon(Icons.Filled.ChevronRight, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                } else Row(
                     Modifier.fillMaxWidth().clickable { close(); it.onClick() }.padding(horizontal = 20.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -336,6 +430,11 @@ internal fun SideMenu(name: String, sub: String, items: List<MenuItem>, close: (
                 }
             }
         }
-        Text("$APP_NAME · v${BuildConfig.VERSION_NAME}", fontSize = 12.sp, color = Color(0xFF6B7590), modifier = Modifier.padding(20.dp))
+        val menuCtx = LocalContext.current
+        Text("$APP_NAME · v${BuildConfig.VERSION_NAME}", fontSize = 12.sp, color = Color(0xFF6B7590), modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp))
+        Text("Privacy Policy", fontSize = 12.5.sp, color = Color(0xFF2463D1), fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(start = 12.dp, bottom = 12.dp).clip(RoundedCornerShape(8.dp))
+                .clickable { close(); try { menuCtx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_URL))) } catch (_: Exception) {} }
+                .padding(horizontal = 8.dp, vertical = 8.dp))
     }
 }

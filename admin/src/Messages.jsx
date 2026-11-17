@@ -49,12 +49,24 @@ export default function Messages() {
     <>
       <section className="card">
         <h2>New leader message</h2>
-        <p className="sub">Landscape video (MP4) or audio (MP3/M4A). Shows on top of every member's home screen.</p>
-        <form onSubmit={publish} className="form">
-          <label>Title (Hindi)<input type="text" value={title} onChange={(e) => setTitle(e.target.value)} required placeholder="वादों का हिसाब दो, दिल्ली को जवाब दो" /></label>
-          <label>Summary (optional, shown under the title in the app)<textarea rows={3} value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="संदेश का छोटा सार" /></label>
-          <label>File<input type="file" accept="video/*,audio/*" onChange={(e) => setFile(e.target.files[0])} required /></label>
-          <div style={{ alignSelf: 'end' }}><button className="btn" type="submit" disabled={busy}>{busy ? 'Uploading…' : 'Publish'}</button></div>
+        <p className="sub">Shows on top of every member's home screen as soon as it is published.</p>
+        <form onSubmit={publish} className="composer">
+          <div className="composer-main">
+            <label>Title (Hindi)
+              <input type="text" className="big" value={title} onChange={(e) => setTitle(e.target.value)} required placeholder="वादों का हिसाब दो, दिल्ली को जवाब दो" />
+            </label>
+            <label>Short summary <span className="muted">shown under the title in the app</span>
+              <textarea rows={4} value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="संदेश का छोटा सार" />
+            </label>
+          </div>
+          <div className="composer-side">
+            <label className={'dropzone' + (file ? ' has' : '')}>
+              <input type="file" accept="video/*,audio/*" onChange={(e) => setFile(e.target.files[0] || null)} required hidden />
+              {file ? (<><b>{file.name}</b><span>{(file.size / 1048576).toFixed(1)} MB · {file.type.startsWith('audio') ? 'Audio' : 'Video'}</span><span className="link">Choose another file</span></>)
+                : (<><b>Choose the video or audio file</b><span>MP4 video (landscape) or MP3 / M4A audio</span></>)}
+            </label>
+            <button className="btn" type="submit" disabled={busy || !file}>{busy ? 'Uploading…' : 'Publish message'}</button>
+          </div>
         </form>
         {note && <div className={'notice' + (note.ok ? ' ok' : '')} style={{ marginTop: 12 }}>{note.text}</div>}
       </section>

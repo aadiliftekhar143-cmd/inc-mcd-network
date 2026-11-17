@@ -116,7 +116,7 @@ class MainActivity : ComponentActivity() {
         openTask.value = intent?.getLongExtra("open_task", 0L)?.takeIf { it > 0 }
         openInbox.value = intent?.getBooleanExtra("open_inbox", false) == true
         setContent {
-            MaterialTheme(colorScheme = lightColorScheme(primary = Blue, secondary = Orange, background = Ground, surface = Color.White)) {
+            MaterialTheme(colorScheme = lightColorScheme(primary = Blue, secondary = Orange, background = Ground, surface = Color.White), typography = AppTypography) {
                 WardApp(openTask, openInbox)
             }
         }
@@ -209,15 +209,15 @@ internal fun WardApp(openTask: MutableState<Long?> = mutableStateOf(null), openI
     LaunchedEffect(openInbox.value) {
         if (openInbox.value && screen != Screen.Login && role == "member") { screen = Screen.Inbox; openInbox.value = false }
     }
-    val switchProfile: (() -> Unit)? = Store.otherProfile(ctx)?.takeIf { screen != Screen.Login }?.let { other ->
-        { Store.activate(ctx, other); role = Store.role(ctx); homeData = null; screen = Screen.Home }
-    }
+    // One number can hold a ward-side profile and a leader post. Switching just opens the other stored login.
+    val switchTo: (JSONObject) -> Unit = { other -> Store.activate(ctx, other); role = Store.role(ctx); homeData = null; screen = Screen.Home }
     if (screen != Screen.Login && role != "member") {
-        key(role) { LeaderApp(role = role, onLogout = logout, onSwitch = switchProfile, openInbox = openInbox) }
+        key(role) { LeaderApp(role = role, onLogout = logout, others = Store.otherProfiles(ctx), onSwitchTo = switchTo, openInbox = openInbox) }
         return
     }
     val goHome = { if (screen is Screen.Task || screen is Screen.Profile) homeKey++; screen = Screen.Home }
-    val backFromInbox = { homeKey++; screen = Screen.Home }
+    // Opening the inbox marks everything read, so the red dot goes at once; the reload then confirms it.
+    val backFromInbox = { homeData?.put("unread_inbox", 0); homeKey++; screen = Screen.Home }
     val nav = Nav(
         home = goHome,
         messages = { screen = Screen.Messages },
@@ -253,8 +253,8 @@ internal fun WardApp(openTask: MutableState<Long?> = mutableStateOf(null), openI
                     nav = nav,
                     onTask = { t, shares -> screen = Screen.Task(t, shares) },
                     onLogout = logout,
-                    otherProfile = Store.otherProfile(ctx),
-                    onSwitch = switchProfile,
+                    others = Store.otherProfiles(ctx),
+                    onSwitchTo = switchTo,
                     onMenu = { item -> screen = when (item) {
                         "posters" -> Screen.Posters
                         "inbox" -> Screen.Inbox
@@ -423,51 +423,56 @@ internal fun LoginScreen(onDone: () -> Unit) {
 
                     HorizontalDivider(color = Color(0xFFBBF7D0))
 
-                    ProfileField("नाम", m.optString("name"))
+                    BigField("नाम", m.optString("name"))
                     if (loginRole != "member") {
-                        ProfileField("पद", ROLE_HI[loginRole] ?: loginRole)
-                        m.str("district")?.let { ProfileField("ज़िला (District)", it) }
-                        m.str("assembly")?.let { ProfileField("विधानसभा", it) }
+                        BigField("पद", ROLE_HI[loginRole] ?: loginRole)
+                        m.str("district")?.let { BigField("संगठनात्मक ज़िला", it) }
+                        m.str("assembly")?.let { BigField("विधानसभा", it) }
                     } else {
-                    val wardName = m.optString("ward_name").takeIf { it.isNotBlank() && it != "null" }
-                    ProfileField("वार्ड", "वार्ड ${m.optInt("ward_no")}" + (wardName?.let { " ($it)" } ?: ""))
-                    val district = (m.optString("district").takeIf { it.isNotBlank() && it != "null" }
-                        ?: m.optString("zone").takeIf { it.isNotBlank() && it != "null" })
-                    if (district != null) ProfileField("कांग्रेस संगठनात्मक ज़िला", district)
-                    val ac = m.optString("assembly").takeIf { it.isNotBlank() && it != "null" }
-                    if (ac != null) ProfileField("विधानसभा", ac)
+                        val wardName = m.str("ward_name")
+                        val applicant = m.optBoolean("is_applicant", true)
+                        BigField("पद", if (!applicant) "ब्लॉक अध्यक्ष" else if (!m.isNull("block_no")) "वार्ड सदस्य और ब्लॉक अध्यक्ष" else "वार्ड सदस्य")
+                        if (applicant) BigField("वार्ड", "वार्ड ${m.optInt("ward_no")}" + (wardName?.let { " ($it)" } ?: ""))
+                        if (!m.isNull("block_no")) BigField("ब्लॉक", "ब्लॉक ${m.optInt("block_no")}")
+                        (m.str("district") ?: m.str("zone"))?.let { BigField("संगठनात्मक ज़िला", it) }
+                        m.str("assembly")?.let { BigField("विधानसभा", it) }
                     }
-                    ProfileField("मोबाइल", "+91 $mobile")
+                    BigField("मोबाइल", "+91 $mobile")
                 }
 
-                // This number holds two profiles (for example Observer of one assembly and member of a ward): let them pick.
+                // This number holds more than one profile (for example Observer of one assembly and member of a ward): let them pick.
                 val others = match.profiles.filter { it.optString("role") != match.role }
-                if (others.isNotEmpty()) {
-                    Text("इस नंबर पर आपकी दो प्रोफ़ाइल हैं। जो खोलनी हो वह चुनें। बाद में मेन्यू से बदल भी सकते हैं।", fontSize = 13.sp, color = Muted, lineHeight = 19.sp)
-                    others.forEach { o ->
-                        OutlinedButton(
-                            onClick = { Store.setProfiles(ctx, match.profiles); Store.activate(ctx, o); onDone() },
-                            modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(12.dp),
+                val open: (JSONObject?) -> Unit = { o ->
+                    Store.setProfiles(ctx, match.profiles)
+                    if (o != null) Store.activate(ctx, o) else { Store.setToken(ctx, match.token); Store.setRole(ctx, match.role) }
+                    onDone()
+                }
+                if (others.isEmpty()) {
+                    Button(
+                        onClick = { open(null) },
+                        modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Green),
+                    ) { Text("आगे बढ़ें  ", fontSize = 18.sp, fontWeight = FontWeight.Bold); Icon(Icons.AutoMirrored.Filled.ArrowForward, null) }
+                } else {
+                    Text(
+                        "इस नंबर पर आपकी ${match.profiles.size} प्रोफ़ाइल हैं। जो खोलनी हो वह चुनें। बाद में मेन्यू से बदल भी सकते हैं।",
+                        fontSize = 15.5.sp, color = Navy, lineHeight = 23.sp, fontWeight = FontWeight.Bold, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                    )
+                    val first = match.profiles.firstOrNull { it.optString("role") == match.role }
+                    (listOfNotNull(first) + others).forEachIndexed { i, o ->
+                        val colour = if (i == 0) Green else if (i == 1) Navy else Orange
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(colour)
+                                .clickable { open(if (o === first) null else o) }.padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(
-                                (ROLE_HI[o.optString("role")] ?: "") + " प्रोफ़ाइल खोलें" + (if (o.optString("role") == "member") " (वार्ड ${o.optInt("ward_no")})" else o.str("assembly")?.let { " ($it)" } ?: ""),
-                                fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Navy,
-                            )
+                            Column(Modifier.weight(1f)) {
+                                Text("${profileLabel(o)} प्रोफ़ाइल खोलें", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                                profileWhere(o).takeIf { it.isNotBlank() }?.let { Text(it, color = Color.White.copy(alpha = 0.9f), fontSize = 14.sp, fontWeight = FontWeight.Medium) }
+                            }
+                            Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = Color.White)
                         }
                     }
-                }
-                Button(
-                    onClick = {
-                        Store.setProfiles(ctx, match.profiles)
-                        Store.setToken(ctx, match.token)
-                        Store.setRole(ctx, match.role)
-                        onDone()
-                    },
-                    modifier = Modifier.fillMaxWidth().height(56.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Green),
-                ) {
-                    Text(if (others.isNotEmpty()) "${ROLE_HI[match.role] ?: ""} प्रोफ़ाइल खोलें  " else "आगे बढ़ें  ", fontSize = if (others.isNotEmpty()) 16.sp else 18.sp, fontWeight = FontWeight.Bold); Icon(Icons.AutoMirrored.Filled.ArrowForward, null)
                 }
 
                 TextButton(
@@ -480,6 +485,15 @@ internal fun LoginScreen(onDone: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+/** A found detail on the login screen: small label, then the value big and bold so it can be read at a glance. */
+@Composable
+internal fun BigField(label: String, value: String) {
+    Column(Modifier.fillMaxWidth()) {
+        Text(label, color = GreenText, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+        Text(value, color = Navy, fontSize = 18.sp, fontWeight = FontWeight.Bold, lineHeight = 25.sp)
     }
 }
 
@@ -609,8 +623,8 @@ internal fun HomeScreen(
     onTask: (JSONObject, List<JSONObject>) -> Unit,
     onLogout: () -> Unit,
     onMenu: (String) -> Unit = {},
-    otherProfile: JSONObject? = null,
-    onSwitch: (() -> Unit)? = null,
+    others: List<JSONObject> = emptyList(),
+    onSwitchTo: (JSONObject) -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val drawer = rememberDrawerState(DrawerValue.Closed)
@@ -706,6 +720,15 @@ internal fun HomeScreen(
     val days = remember(today, taskDays) { stripDays(today, taskDays) }
     val leaderMsg = d.optJSONObject("leader")
     val district = member.str("district") ?: member.str("zone")
+    // Ward member, Block President, or both on the same login.
+    val applicant = member.optBoolean("is_applicant", true)
+    val blockNo = if (member.isNull("block_no")) null else member.optInt("block_no")
+    val whoLine = when {
+        !applicant -> "ब्लॉक अध्यक्ष · ब्लॉक $blockNo"
+        blockNo != null -> "वार्ड ${member.optInt("ward_no")} · ब्लॉक अध्यक्ष"
+        else -> "वार्ड ${member.optInt("ward_no")}"
+    }
+    val leaderTasks = remember(d) { d.optJSONArray("leader_tasks")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } } ?: emptyList() }
 
     BackHandler(enabled = drawer.isOpen) { scope.launch { drawer.close() } }
     ModalNavigationDrawer(
@@ -713,9 +736,8 @@ internal fun HomeScreen(
         drawerContent = {
             SideMenu(
                 name = "${member.optString("name").trim()} Ji",
-                sub = "वार्ड ${member.optInt("ward_no")}" + (district?.let { " · $it" } ?: ""),
-                items = listOfNotNull(
-                    if (otherProfile != null && onSwitch != null) MenuItem(Icons.Filled.SwitchAccount, "${ROLE_HI[otherProfile.optString("role")] ?: ""} प्रोफ़ाइल खोलें") { onSwitch() } else null,
+                sub = whoLine + (district?.let { " · $it" } ?: ""),
+                items = others.map { o -> MenuItem(Icons.Filled.SwitchAccount, "अपनी ${profileLabel(o)} वाली प्रोफ़ाइल पर स्विच करें", highlight = true) { onSwitchTo(o) } } + listOf(
                     MenuItem(Icons.Filled.MarkEmailUnread, "मेरा इनबॉक्स", badge = d.optInt("unread_inbox")) { onMenu("inbox") },
                     MenuItem(Icons.Filled.Image, "पोस्टर और बैनर") { onMenu("posters") },
                     MenuItem(Icons.Filled.AddTask, "अपना टास्क जोड़ें") { onMenu("own") },
@@ -777,7 +799,7 @@ internal fun HomeScreen(
                                 ) {
                                     Icon(Icons.Filled.LocationOn, null, tint = Color(0xFFE2E9F8), modifier = Modifier.size(13.dp))
                                     Text(
-                                        " वार्ड ${member.optInt("ward_no")}" + (district?.let { " · $it" } ?: ""),
+                                        " $whoLine" + (district?.let { " · $it" } ?: ""),
                                         color = Color(0xFFE2E9F8), fontSize = 12.sp, maxLines = 1,
                                     )
                                 }
@@ -874,10 +896,53 @@ internal fun HomeScreen(
                 }
             }
 
-            // Tasks for the selected day
-            item(key = "tasks") {
-                Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 26.dp)) {
-                    SectionTitle(if (selected == today || selected.isBlank()) "आज के टास्क" else "${hiDate(selected).substringBeforeLast(' ')} के टास्क")
+            // Tasks the President (or a leader in his name) gave to ward members or Block Presidents
+            val dueLeaderTasks = leaderTasks.filter { !it.optBoolean("done") }
+            if (dueLeaderTasks.isNotEmpty()) item(key = "leader_tasks") {
+                Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 26.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    PresidentTaskLine()
+                    CardBox {
+                        dueLeaderTasks.forEachIndexed { i, t ->
+                            if (i > 0) HorizontalDivider(color = Color(0xFFF0F2F6))
+                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                if (t.optString("level") == "block") Text("ब्लॉक अध्यक्ष के लिए", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = OrangeText,
+                                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(OrangeBg).padding(horizontal = 7.dp, vertical = 2.dp))
+                                Text(t.optString("title"), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Ink, lineHeight = 23.sp)
+                                t.str("description")?.let { Text(it, fontSize = 14.sp, color = Color(0xFF3A4560), lineHeight = 21.sp) }
+                                t.str("due_date")?.let { Text("आख़िरी तारीख़: ${hiDate(it)}", fontSize = 12.5.sp, color = Muted) }
+                                t.str("audio_url")?.let { AudioPlayer(it) }
+                                OutlinedButton(
+                                    onClick = { scope.launch { try { Api.call(ctx, "leader_task_done", JSONObject().put("task_id", t.optLong("id"))); reload++ } catch (_: Exception) {} } },
+                                    shape = RoundedCornerShape(10.dp),
+                                ) { Icon(Icons.Filled.Check, null, modifier = Modifier.size(16.dp)); Text(" हो गया", fontWeight = FontWeight.Bold) }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // The day's work. A day with only posts to share is named for what it is.
+            val dayName = if (selected == today || selected.isBlank()) "आज" else hiDate(selected).substringBeforeLast(' ')
+            val shareOnly = uploadTasks.isEmpty() && shareTasks.isNotEmpty()
+            item(key = "daytitle") {
+                Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 28.dp)) {
+                    Text(if (shareOnly) "$dayName के टास्क: सोशल मीडिया शेयर" else "$dayName के टास्क", fontSize = 21.sp, lineHeight = 28.sp, fontWeight = FontWeight.ExtraBold, color = Navy)
+                    if (shareOnly) Text("नीचे दिए गए X, Facebook और Instagram के पोस्ट शेयर करें।", fontSize = 14.sp, color = Muted, lineHeight = 21.sp, modifier = Modifier.padding(top = 4.dp))
+                }
+            }
+
+            // Posts to share, one platform at a time
+            if (shareTasks.isNotEmpty()) item(key = "social") {
+                Column(Modifier.padding(top = 14.dp)) {
+                    if (!shareOnly) SectionTitle("सोशल मीडिया शेयर", Modifier.padding(horizontal = 16.dp))
+                    SocialPosts(shareTasks, d.optJSONObject("social"), perShare = PTS_SHARE) { reload++ }
+                }
+            }
+
+            // Upload tasks for the selected day
+            if (!shareOnly) item(key = "tasks") {
+                Column(Modifier.padding(start = 16.dp, end = 16.dp, top = if (shareTasks.isNotEmpty()) 24.dp else 14.dp)) {
+                    if (shareTasks.isNotEmpty()) SectionTitle("फ़ील्ड टास्क")
                     CardBox {
                         if (uploadTasks.isEmpty()) {
                             Text("इस दिन के लिए अभी कोई टास्क नहीं है।", color = Muted, fontSize = 14.sp, textAlign = TextAlign.Center,
@@ -900,14 +965,6 @@ internal fun HomeScreen(
                             }
                         }
                     }
-                }
-            }
-
-            // Leader's posts for the day, from links the admin added to share cards
-            item(key = "social") {
-                Column(Modifier.padding(top = 26.dp)) {
-                    SectionTitle("देवेन्द्र यादव जी के पोस्ट", Modifier.padding(horizontal = 16.dp))
-                    SocialPosts(shareTasks, d.optJSONObject("social"), perShare = PTS_SHARE) { reload++ }
                 }
             }
 
@@ -1008,52 +1065,85 @@ internal val PLATFORMS = listOf(Platform("x", "X", Color(0xFF111111)), Platform(
  */
 @Composable
 internal fun SocialPosts(shareTasks: List<JSONObject>, social: JSONObject?, perShare: Int, onShared: () -> Unit) {
-    val ctx = LocalContext.current
-    val firstWithPosts = PLATFORMS.firstOrNull { p -> shareTasks.any { it.str("link_${p.key}") != null } }?.key ?: "facebook"
-    var platform by remember(shareTasks) { mutableStateOf(firstWithPosts) }
-    val p = PLATFORMS.first { it.key == platform }
-    val posts = shareTasks.filter { it.str("link_${p.key}") != null }
-
-    Row(
-        Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color.White)
-            .border(1.dp, Line, RoundedCornerShape(14.dp)).padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        PLATFORMS.forEach { item ->
-            val on = item.key == platform
-            Text(
-                item.label, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
-                color = if (on) Color.White else Navy,
-                modifier = Modifier.weight(1f).clip(RoundedCornerShape(11.dp)).background(if (on) Navy else Color.Transparent)
-                    .clickable { platform = item.key }.padding(vertical = 8.dp),
-            )
-        }
+    // Shares made on this screen before the server data comes back, as "taskId:platform".
+    val local = remember { mutableStateListOf<String>() }
+    fun postsOf(p: Platform) = shareTasks.filter { it.str("link_${p.key}") != null }
+    fun isShared(t: JSONObject, key: String) = "${t.optLong("id")}:$key" in local ||
+        (t.optJSONArray("shared")?.let { a -> (0 until a.length()).any { a.getString(it) == key } } ?: false)
+    val live = PLATFORMS.filter { postsOf(it).isNotEmpty() }
+    if (live.isEmpty()) return
+    val doneKeys = live.filter { p -> postsOf(p).all { isShared(it, p.key) } }.map { it.key }
+    val pending = live.filter { it.key !in doneKeys }
+    // The platform on screen: the one the member tapped, otherwise the first one still to be shared.
+    var picked by remember { mutableStateOf<String?>(null) }
+    val p = live.firstOrNull { it.key == picked } ?: pending.firstOrNull() ?: live.first()
+    val posts = postsOf(p)
+    fun names(xs: List<Platform>) = when (xs.size) {
+        0 -> ""; 1 -> xs[0].label; 2 -> "${xs[0].label} और ${xs[1].label}"
+        else -> xs.dropLast(1).joinToString(", ") { it.label } + " और ${xs.last().label}"
     }
-    Spacer(Modifier.height(12.dp))
+    val allWord = when (live.size) { 1 -> "आज का शेयर पूरा कर लिया"; 2 -> "दोनों शेयर पूरे कर लिए"; else -> "तीनों शेयर पूरे कर लिए" }
 
-    if (posts.isEmpty()) {
-        Column(
-            Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.White)
-                .border(1.dp, Line, RoundedCornerShape(18.dp)).padding(18.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text("इस दिन ${p.label} की कोई पोस्ट नहीं है।", color = Muted, fontSize = 14.sp, textAlign = TextAlign.Center)
-            social?.str(p.key)?.let { url ->
-                TextButton(onClick = { Social.open(ctx, p.key, url) }) { Text("${p.label} प्रोफ़ाइल देखें", color = Blue, fontWeight = FontWeight.Bold) }
+    // Step markers: every platform of the day is always visible, with a tick once it is shared.
+    Row(Modifier.padding(horizontal = 16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        live.forEachIndexed { i, item ->
+            val isDone = item.key in doneKeys
+            val on = item.key == p.key
+            Row(
+                Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(if (on) Navy else Color.White)
+                    .border(if (on) 0.dp else 1.dp, if (isDone) Green else Line, RoundedCornerShape(14.dp))
+                    .clickable { picked = item.key }.padding(horizontal = 8.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center,
+            ) {
+                Box(Modifier.size(22.dp).clip(CircleShape).background(if (isDone) Green else if (on) Orange else Color(0xFFEDF0F5)), contentAlignment = Alignment.Center) {
+                    if (isDone) Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.size(14.dp))
+                    else Text("${i + 1}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (on) Color.White else Muted)
+                }
+                Text(" ${item.label}", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = if (on) Color.White else Navy, maxLines = 1)
             }
         }
-        return
     }
+
+    Text(
+        when {
+            pending.isEmpty() -> "आपने $allWord"
+            p.key in doneKeys -> "${p.label} की पोस्ट आप शेयर कर चुके हैं"
+            else -> "अब ${p.label} की पोस्ट शेयर करें"
+        },
+        fontSize = 18.sp, lineHeight = 25.sp, fontWeight = FontWeight.ExtraBold, color = if (pending.isEmpty()) GreenText else Ink,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 10.dp),
+    )
 
     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         items(posts, key = { p.key + it.optLong("id") }) { t ->
-            PostCard(t, p, perShare, Modifier.fillParentMaxWidth(if (posts.size > 1) 0.86f else 1f), onShared)
+            PostCard(t, p, perShare, Modifier.fillParentMaxWidth(if (posts.size > 1) 0.86f else 1f), onShared) { platform ->
+                local.add("${t.optLong("id")}:$platform")
+                picked = null   // move on to the next platform that is still pending
+            }
         }
+    }
+
+    // What is done and what is left, in one line
+    val doneList = live.filter { it.key in doneKeys }
+    Row(
+        Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            .background(if (pending.isEmpty()) GreenBg else OrangeBg).padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(if (pending.isEmpty()) Icons.Filled.CheckCircle else Icons.Filled.Info, null, tint = if (pending.isEmpty()) Green else Orange, modifier = Modifier.size(18.dp))
+        Text(
+            when {
+                pending.isEmpty() -> "आपने $allWord।"
+                doneList.isEmpty() -> "${names(pending)} की शेयरिंग बाकी है।"
+                else -> "${names(doneList)} हो गया। ${names(pending)} बाकी ${if (pending.size > 1) "हैं" else "है"}।"
+            },
+            fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, color = if (pending.isEmpty()) GreenText else OrangeText, modifier = Modifier.padding(start = 8.dp),
+        )
     }
 }
 
 @Composable
-internal fun PostCard(t: JSONObject, p: Platform, perShare: Int, modifier: Modifier, onShared: () -> Unit) {
+internal fun PostCard(t: JSONObject, p: Platform, perShare: Int, modifier: Modifier, onShared: () -> Unit, onRecorded: (String) -> Unit = {}) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val taskId = t.optLong("id")
@@ -1072,6 +1162,7 @@ internal fun PostCard(t: JSONObject, p: Platform, perShare: Int, modifier: Modif
                     onShared()
                 }
                 shared = shared + platform
+                onRecorded(platform)
             } catch (e: Exception) {
             }
         }
@@ -1931,23 +2022,32 @@ internal fun ProgressScreen(data: JSONObject?, onData: (JSONObject) -> Unit, nav
                     }
                     // Anonymous rank: no names, only the member's own position
                     ranks?.let { rk ->
-                        Text("मेरी रैंकिंग", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Muted, modifier = Modifier.padding(start = 2.dp, top = 20.dp, bottom = 10.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf("ward" to "वार्ड में", "assembly" to "विधानसभा में", "district" to "ज़िले में", "delhi" to "दिल्ली में").forEach { (k, label) ->
-                                val o = rk.optJSONObject(k)
-                                Column(
-                                    Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(Color.White).border(1.dp, Line, RoundedCornerShape(14.dp)).padding(vertical = 10.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                ) {
-                                    Text(o?.let { "${it.optInt("rank")}" } ?: "–", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Navy)
-                                    Text(o?.let { "/ ${fmtNum(it.optInt("total"))}" } ?: "", fontSize = 11.sp, color = Muted)
-                                    Text(label, fontSize = 11.5.sp, color = Ink, fontWeight = FontWeight.SemiBold)
+                        Text("मेरी रैंकिंग", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = Ink, modifier = Modifier.padding(start = 2.dp, top = 22.dp, bottom = 10.dp))
+                        // Two rows of two, so the rank and the total sit on one line: 1/9
+                        listOf("ward" to "वार्ड में", "assembly" to "विधानसभा में", "district" to "ज़िले में", "delhi" to "दिल्ली में").chunked(2).forEach { pair ->
+                            Row(Modifier.padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                pair.forEach { (k, label) ->
+                                    val o = rk.optJSONObject(k)
+                                    Column(
+                                        Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).background(Color.White).border(1.dp, Line, RoundedCornerShape(16.dp)).padding(horizontal = 14.dp, vertical = 12.dp),
+                                    ) {
+                                        Text(label, fontSize = 13.5.sp, color = Muted, fontWeight = FontWeight.SemiBold)
+                                        Text(
+                                            androidx.compose.ui.text.buildAnnotatedString {
+                                                if (o == null) append("–") else {
+                                                    pushStyle(androidx.compose.ui.text.SpanStyle(fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = Navy)); append("${o.optInt("rank")}"); pop()
+                                                    pushStyle(androidx.compose.ui.text.SpanStyle(fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Muted)); append("/${fmtNum(o.optInt("total"))}"); pop()
+                                                }
+                                            },
+                                            maxLines = 1, softWrap = false, lineHeight = 34.sp, fontSize = 28.sp,
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
                     // 1. The rules
-                    Text("आपके अंक कैसे गिने जाते हैं?", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.padding(start = 2.dp, top = 22.dp, bottom = 10.dp))
+                    Text("आपके अंक कैसे गिने जाते हैं?", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = Ink, modifier = Modifier.padding(start = 2.dp, top = 16.dp, bottom = 10.dp))
                     CardBox {
                         RuleRow(Icons.Filled.Share, Color(0xFFE8F0FE), Blue, "सोशल मीडिया शेयर (हर पोस्ट, हर प्लेटफ़ॉर्म)", perShare)
                         HorizontalDivider(color = Color(0xFFF0F2F6))
@@ -1966,13 +2066,13 @@ internal fun ProgressScreen(data: JSONObject?, onData: (JSONObject) -> Unit, nav
                     val ownTotal = maxOf(stats.optInt("own_total"), ownApproved + ownPending)
                     val joined = parseYmd(data?.optJSONObject("member")?.optString("first_login_at").orEmpty())
                     val days = joined?.let { ((System.currentTimeMillis() - it.timeInMillis) / 86_400_000L).toInt() + 1 }
-                    Text("अब तक आपका काम", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.padding(start = 2.dp, top = 22.dp, bottom = 10.dp))
+                    Text("अब तक आपके द्वारा किए गए टास्क", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = Ink, modifier = Modifier.padding(start = 2.dp, top = 22.dp, bottom = 10.dp))
                     CardBox {
                         days?.let {
                             DoneRow("ऐप से जुड़े हुए", "$it दिन", null)
                             HorizontalDivider(color = Color(0xFFF0F2F6))
                         }
-                        DoneRow("सोशल मीडिया शेयर", "$shares शेयर", shares * perShare)
+                        DoneRow("सोशल मीडिया शेयर वाले टास्क", "$shares शेयर", shares * perShare)
                         HorizontalDivider(color = Color(0xFFF0F2F6))
                         DoneRow("पूरे किए गए टास्क", "$fullTasks टास्क", fullTasks * perTask)
                         HorizontalDivider(color = Color(0xFFF0F2F6))

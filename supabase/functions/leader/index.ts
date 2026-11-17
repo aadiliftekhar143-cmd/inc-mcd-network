@@ -23,6 +23,11 @@ const clean = (v: unknown, max = 2000) => {
 };
 const memberDistrict = (m: any) => String(m.district || m.zone || "").trim();
 const grade = (s: number) => (s >= 75 ? "A" : s >= 60 ? "B" : s >= 45 ? "C" : "D");
+const istNow = () => new Date(Date.now() + 5.5 * 3600 * 1000);
+const istToday = () => istNow().toISOString().slice(0, 10);
+/** Monthly member feedback is about the month that just ended: it opens on the 1st and stays open all month. */
+const feedbackMonth = () => { const d = istNow(); return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1)).toISOString().slice(0, 10); };
+const TALKED = "बात हो गई";
 const daysAgo = (iso: string | null) => (iso ? Math.floor((Date.now() - new Date(iso).getTime()) / DAY) : null);
 
 /** Member status from app use: never logged in, active (2 days), slow (7 days), off. */
@@ -64,9 +69,9 @@ async function leaderFromSession(token: string | null) {
  * a District President only their district, an Observer only their assembly.
  */
 async function overview(me: any) {
-  const [master, members, stats, leaders, recent, reports, ratings] = await Promise.all([
+  const [master, members, stats, leaders, recent, reports, ratings, calls7, dcReports, myFeedback] = await Promise.all([
     all("wards", "ward_no, ward_name, assembly, district"),
-    all("members", "mobile, name, ward_no, ward_name, assembly, district, zone, first_login_at, last_active_at", (q) => q.eq("active", true)),
+    all("members", "mobile, name, ward_no, ward_name, assembly, district, zone, first_login_at, last_active_at, block_no, is_applicant", (q) => q.eq("active", true)),
     all("member_stats", "mobile, points, videos, photos, shares, full_tasks"),
     all("leaders", "mobile, name, role, district, assembly, first_login_at, last_active_at", (q) => q.eq("active", true)),
     // Uploads and shares in the last 14 days, for week-on-week growth.
@@ -76,6 +81,9 @@ async function overview(me: any) {
     ]).then(([a, b]) => [...a, ...b]),
     all("field_reports", "mobile, created_at", (q) => q.gte("created_at", new Date(Date.now() - 30 * DAY).toISOString())),
     all("member_ratings", "member_mobile, ground, connect, booth"),
+    all("leader_calls", "by_mobile, outcome, created_at", (q) => q.gte("created_at", new Date(Date.now() - 7 * DAY).toISOString())),
+    all("coordinator_reports", "mobile, report_date, calls, talked", (q) => q.gte("report_date", new Date(Date.now() - 7 * DAY).toISOString().slice(0, 10))),
+    me.role === "observer" ? all("member_feedback", "member_mobile", (q) => q.eq("observer_mobile", me.mobile).eq("month", feedbackMonth())) : Promise.resolve([]),
   ]);
   const st = new Map(stats.map((s) => [s.mobile, s]));
   const rate = new Map<string, number>();
@@ -95,8 +103,17 @@ async function overview(me: any) {
       points: Number(s.points ?? 0), videos: Number(s.videos ?? 0), photos: Number(s.photos ?? 0), shares: Number(s.shares ?? 0),
       full_tasks: Number(s.full_tasks ?? 0), week: thisWeek.get(m.mobile) ?? 0, prev_week: lastWeek.get(m.mobile) ?? 0,
       rating: rate.get(m.mobile) ?? null,
+      block_no: m.block_no ?? null, is_applicant: m.is_applicant !== false,
     };
   });
+  // Blocks (one per ward) and their presidents, best first.
+  const blocks = mem.filter((m) => m.block_no != null).map((m) => {
+    const w = master.find((x) => x.ward_no === m.block_no);
+    return {
+      no: m.block_no, name: w?.ward_name ?? null, assembly: w?.assembly ?? m.assembly, district: w?.district ?? m.district,
+      president: { name: m.name, mobile: m.mobile }, status: m.status, points: m.points, last_active_days: m.last_active_days,
+    };
+  }).sort((a, b) => b.points - a.points).map((b, i) => ({ ...b, rank: i + 1 }));
 
   const share = (xs: any[], f: (x: any) => boolean) => (xs.length ? xs.filter(f).length / xs.length : 0);
   const reportsBy = new Map<string, any[]>();
@@ -176,13 +193,23 @@ async function overview(me: any) {
   const delhiScore = districts.length ? Math.round(districts.reduce((a, d) => a + d.score * d.total, 0) / Math.max(1, mem.length)) : 0;
 
   // Scope to the leader
-  let scope = { members: mem, wards, assemblies, districts };
-  if (me.role === "dp") {
+  let scope = { members: mem, wards, assemblies, districts, blocks };
+  if (me.role === "dc") {
+    // A coordinator works inside one district, but sees every District President's standing.
+    scope = {
+      members: mem.filter((m) => norm(m.district) === norm(me.district)),
+      wards: wards.filter((w) => norm(w.district) === norm(me.district)),
+      assemblies: assemblies.filter((a) => norm(a.district) === norm(me.district)),
+      districts,
+      blocks: blocks.filter((b) => norm(b.district) === norm(me.district)),
+    };
+  } else if (me.role === "dp") {
     scope = {
       members: mem.filter((m) => norm(m.district) === norm(me.district)),
       wards: wards.filter((w) => norm(w.district) === norm(me.district)),
       assemblies: assemblies.filter((a) => norm(a.district) === norm(me.district)),
       districts: districts.filter((d) => norm(d.name) === norm(me.district)),
+      blocks: blocks.filter((b) => norm(b.district) === norm(me.district)),
     };
   } else if (me.role === "observer") {
     scope = {
@@ -190,8 +217,20 @@ async function overview(me: any) {
       wards: wards.filter((w) => norm(w.assembly) === norm(me.assembly)),
       assemblies: assemblies.filter((a) => norm(a.name) === norm(me.assembly)),
       districts: districts.filter((d) => norm(d.name) === norm(me.district)),
+      blocks: blocks.filter((b) => norm(b.assembly) === norm(me.assembly)),
     };
   }
+  // District Coordinators with their calling this week (President and General Secretary).
+  const coordinators = me.role === "president" || me.role === "gs" ? leaders.filter((l) => l.role === "dc").map((l) => {
+    const cs = calls7.filter((c) => c.by_mobile === l.mobile);
+    const reps = dcReports.filter((x) => x.mobile === l.mobile);
+    const d = districts.find((x) => norm(x.name) === norm(l.district));
+    return {
+      name: l.name, mobile: l.mobile, district: l.district ?? "", logged: !!l.first_login_at,
+      calls_7: cs.length, talked_7: cs.filter((c) => c.outcome === TALKED).length, reports_7: reps.length,
+      last_report: reps.map((x) => x.report_date).sort().pop() ?? null, district_rank: d?.rank ?? null, district_score: d?.score ?? null,
+    };
+  }).sort((a, b) => a.calls_7 - b.calls_7) : [];
   const gs = leaders.find((l) => l.role === "gs") ?? null;
   return {
     ...scope,
@@ -199,6 +238,8 @@ async function overview(me: any) {
     district_ranks: districts.map((d) => ({ name: d.name, rank: d.rank, score: d.score })),
     totals, delhi_score: delhiScore, delhi_grade: grade(delhiScore),
     gs: gs ? { name: gs.name, mobile: gs.mobile } : null,
+    coordinators,
+    feedback: me.role === "observer" ? { month: feedbackMonth(), done: myFeedback.map((f: any) => f.member_mobile) } : null,
     suggestions: me.role === "gs" ? suggestions(districts, assemblies, mem) : [],
   };
 }
@@ -221,8 +262,15 @@ function suggestions(_districts: any[], assemblies: any[], mem: any[]) {
   return [...obs, ...mems];
 }
 
-/** Leaders a task at this level and target reaches. */
-function audienceOf(t: any, leaders: any[]) {
+/** People a task at this level and target reaches. Levels 'block' and 'member' are ward-side people, the rest are leaders. */
+function audienceOf(t: any, leaders: any[], members: any[] = []) {
+  if (t.level === "block" || t.level === "member") {
+    return members.filter((m) =>
+      (t.level === "block" ? m.block_no != null : m.is_applicant !== false) &&
+      (!t.target_mobile || m.mobile === t.target_mobile) &&
+      (!t.target_district || norm(memberDistrict(m)) === norm(t.target_district)) &&
+      (!t.target_assembly || norm(m.assembly) === norm(t.target_assembly)));
+  }
   return leaders.filter((l) =>
     l.role === t.level &&
     (!t.target_mobile || l.mobile === t.target_mobile) &&
@@ -234,13 +282,14 @@ function audienceOf(t: any, leaders: any[]) {
 async function deliver(b: any, sender: any) {
   const leaders = await all("leaders", "mobile, role, district, assembly", (q) => q.eq("active", true));
   let to: string[] = [];
-  if (b.audience === "member" || b.audience === "all") {
-    const ms = await all("members", "mobile, district, zone, assembly", (q) => q.eq("active", true));
+  if (b.audience === "member" || b.audience === "block" || b.audience === "all") {
+    const ms = await all("members", "mobile, district, zone, assembly, block_no, is_applicant", (q) => q.eq("active", true));
     to.push(...ms.filter((m) =>
+      (b.audience === "all" || (b.audience === "block" ? m.block_no != null : m.is_applicant !== false)) &&
       (!b.district || norm(memberDistrict(m)) === norm(b.district)) &&
       (!b.assembly || norm(m.assembly) === norm(b.assembly))).map((m) => m.mobile));
   }
-  for (const role of ["gs", "dp", "observer"]) {
+  for (const role of ["gs", "dc", "dp", "observer"]) {
     if (b.audience === role || b.audience === "all" || (b.audience === "leaders")) {
       to.push(...leaders.filter((l) => l.role === role &&
         (!b.district || norm(l.district) === norm(b.district)) &&
@@ -248,7 +297,7 @@ async function deliver(b: any, sender: any) {
     }
   }
   to = [...new Set(to)].filter((m) => m !== sender.mobile);
-  const roleName: Record<string, string> = { president: PRESIDENT, gs: "महासचिव", dp: "ज़िला अध्यक्ष", observer: "विधानसभा ऑब्ज़र्वर" };
+  const roleName: Record<string, string> = { president: PRESIDENT, gs: "महासचिव", dc: "ज़िला कोऑर्डिनेटर", dp: "ज़िला अध्यक्ष", observer: "विधानसभा ऑब्ज़र्वर" };
   const from_name = sender.role === "president" ? PRESIDENT : `${sender.name} (${roleName[sender.role]})`;
   for (let i = 0; i < to.length; i += 500) {
     await db.from("inbox").insert(to.slice(i, i + 500).map((m) => ({
@@ -301,7 +350,7 @@ Deno.serve(async (req) => {
       const s = await settings();
       const unread = (await db.from("inbox").select("id", { count: "exact", head: true }).eq("to_mobile", me.mobile).is("read_at", null)).count ?? 0;
       return json({
-        leader: me, unread_inbox: unread, helpline: s.helpline ?? null,
+        leader: me, unread_inbox: unread, helpline: s.helpline ?? null, photo_url: await signed(me.photo_path),
         app_update: {
           version_code: Number(s.app_version_code || 1), version_name: s.app_version_name || "1.0",
           download_url: s.app_download_url || "https://github.com/aadiliftekhar143-cmd/inc-mcd-network/releases/latest/download/app-release.apk",
@@ -315,6 +364,7 @@ Deno.serve(async (req) => {
     // ---- Tasks ----
     if (action === "tasks") {
       const leaders = await all("leaders", "mobile, name, role, district, assembly", (q) => q.eq("active", true));
+      const people = await all("members", "mobile, name, district, zone, assembly, block_no, is_applicant", (q) => q.eq("active", true));
       const done = await all("leader_task_done", "task_id, mobile");
       const doneBy = new Map<number, Set<string>>();
       for (const d of done) (doneBy.get(d.task_id) ?? doneBy.set(d.task_id, new Set()).get(d.task_id)!).add(d.mobile);
@@ -326,12 +376,14 @@ Deno.serve(async (req) => {
       // Progress of every task in the leader's reach (President and GS see all; a DP sees the tasks they gave).
       const visible = isTop ? active : me.role === "dp" ? active.filter((t) => t.created_by_mobile === me.mobile) : [];
       res.progress = visible.map((t) => {
-        const who = audienceOf(t, leaders);
+        const who = audienceOf(t, leaders, people);
         const d = doneBy.get(t.id) ?? new Set();
+        const left = who.filter((l) => !d.has(l.mobile));
         return {
           id: t.id, title: t.title, level: t.level, due_date: t.due_date, created_at: t.created_at,
-          total: who.length, done: who.filter((l) => d.has(l.mobile)).length,
-          left: who.filter((l) => !d.has(l.mobile)).map((l) => ({ mobile: l.mobile, name: l.name, district: l.district, assembly: l.assembly })),
+          total: who.length, done: who.length - left.length, left_count: left.length,
+          // Long lists (ward members) are cut to the first 50 names.
+          left: left.slice(0, 50).map((l) => ({ mobile: l.mobile, name: l.name, district: l.district ?? memberDistrict(l), assembly: l.assembly })),
         };
       });
       if (me.role === "president") {
@@ -355,7 +407,9 @@ Deno.serve(async (req) => {
       const title = clean(body.title, 300);
       if (!title) return json({ error: "title_required" }, 400);
       const level = String(body.level ?? "");
-      const allowed: Record<string, string[]> = { president: ["gs", "dp"], gs: ["dp", "observer"], dp: ["observer"], observer: ["observer"] };
+      const allowed: Record<string, string[]> = {
+        president: ["gs", "dp", "block"], gs: ["dc", "dp", "observer", "block", "member"], dp: ["observer"], observer: ["observer"],
+      };
       if (!(allowed[me.role] ?? []).includes(level)) return json({ error: "not_allowed" }, 403);
       const row: any = {
         level, title, description: clean(body.description), audio_path: clean(body.audio_path, 300),
@@ -398,10 +452,12 @@ Deno.serve(async (req) => {
     if (action === "report_submit") {
       const media = (Array.isArray(body.media) ? body.media : []).filter((m: any) => ownPath(m?.path)).map((m: any) => ({ kind: m.kind, path: m.path }));
       const note = clean(body.note), audio = ownPath(body.audio_path);
-      if (!note && !audio && !media.length) return json({ error: "empty" }, 400);
+      const activities = (Array.isArray(body.activities) ? body.activities : []).map((a: unknown) => clean(a, 80)).filter(Boolean).slice(0, 12);
+      const wardNo = Number(body.ward_no) >= 1 && Number(body.ward_no) <= 250 ? Number(body.ward_no) : null;
+      if (!note && !audio && !media.length && !activities.length) return json({ error: "empty" }, 400);
       const taskId = body.task_id ? Number(body.task_id) : null;
       await db.from("field_reports").insert({
-        mobile: me.mobile, task_id: taskId, note, audio_path: audio, media,
+        mobile: me.mobile, task_id: taskId, note, audio_path: audio, media, ward_no: wardNo, activities,
         lat: typeof body.lat === "number" ? body.lat : null, lng: typeof body.lng === "number" ? body.lng : null,
       });
       if (taskId) await db.from("leader_task_done").upsert({ task_id: taskId, mobile: me.mobile });
@@ -426,7 +482,7 @@ Deno.serve(async (req) => {
       const text = clean(body.text), audio = ownPath(body.audio_path);
       if (!text && !audio) return json({ error: "empty" }, 400);
       const allowed: Record<string, string[]> = {
-        president: ["all", "gs", "dp", "observer", "member"], gs: ["dp", "observer", "member"],
+        president: ["all", "gs", "dc", "dp", "observer", "block", "member"], gs: ["dc", "dp", "observer", "block", "member"],
         dp: ["observer", "member"], observer: ["member"],
       };
       const audience = String(body.audience ?? "");
@@ -478,8 +534,13 @@ Deno.serve(async (req) => {
     }
     if (action === "president_inbox") {
       if (me.role !== "president") return json({ error: "not_allowed" }, 403);
-      const rows = await all("president_messages", "*", (q) => q.order("created_at", { ascending: false }).limit(100));
-      return json({ messages: await Promise.all(rows.map(async (r) => ({
+      // One 7-day bundle at a time: week 0 = the last 7 days, 1 = the 7 days before that, and so on.
+      const week = Math.max(0, Math.min(52, Number(body.week) || 0));
+      const to = new Date(Date.now() - week * 7 * DAY).toISOString(), from = new Date(Date.now() - (week + 1) * 7 * DAY).toISOString();
+      const rows = await all("president_messages", "*", (q) => q.gt("created_at", from).lte("created_at", to).order("created_at", { ascending: false }).limit(300));
+      const { data: first } = await db.from("president_messages").select("created_at").order("created_at").limit(1);
+      const weeks = first?.[0] ? Math.min(52, Math.floor((Date.now() - new Date(first[0].created_at).getTime()) / (7 * DAY)) + 1) : 1;
+      return json({ week, weeks, from, to, messages: await Promise.all(rows.map(async (r) => ({
         ...r, ...tagsOf(r), audio_url: await signed(r.audio_path),
         media: await Promise.all((r.media ?? []).map(async (m: any) => ({ ...m, url: await signed(m.path) }))),
       }))) });
@@ -509,6 +570,90 @@ Deno.serve(async (req) => {
     }
     if (action === "my_ratings") {
       return json({ ratings: await all("member_ratings", "*", (q) => q.eq("observer_mobile", me.mobile)) });
+    }
+
+    // ---- Observer's monthly feedback on a ward member (replaces the star rating) ----
+    if (action === "feedback_save") {
+      if (me.role !== "observer") return json({ error: "not_allowed" }, 403);
+      const member = String(body.member_mobile ?? "").replace(/\D/g, "").slice(-10);
+      const flags = (Array.isArray(body.flags) ? body.flags : []).map((f: unknown) => clean(f, 80)).filter(Boolean).slice(0, 10);
+      const note = clean(body.note), audio = ownPath(body.audio_path);
+      if (!/^[6-9]\d{9}$/.test(member) || (!flags.length && !note && !audio)) return json({ error: "empty" }, 400);
+      const row: any = { observer_mobile: me.mobile, member_mobile: member, month: feedbackMonth(), flags, note, created_at: new Date().toISOString() };
+      if (audio) row.audio_path = audio;
+      const { error } = await db.from("member_feedback").upsert(row, { onConflict: "observer_mobile,member_mobile,month" });
+      if (error) throw error;
+      return json({ ok: true, month: feedbackMonth() });
+    }
+    if (action === "my_feedback") {
+      const rows = await all("member_feedback", "*", (q) => q.eq("observer_mobile", me.mobile).eq("month", feedbackMonth()));
+      return json({ month: feedbackMonth(), feedback: await Promise.all(rows.map(async (f) => ({ ...f, audio_url: await signed(f.audio_path) }))) });
+    }
+
+    // ---- District Coordinator's daily calling report to the General Secretary ----
+    if (action === "dc_report") {
+      if (me.role !== "dc") return json({ error: "not_allowed" }, 403);
+      const today = istToday();
+      const start = new Date(new Date(today + "T00:00:00Z").getTime() - 5.5 * 3600 * 1000).toISOString();
+      const mine = await all("leader_calls", "to_role, outcome", (q) => q.eq("by_mobile", me.mobile).gte("created_at", start));
+      const calls = mine.length, talked = mine.filter((c) => c.outcome === TALKED).length;
+      const { data: sentRow } = await db.from("coordinator_reports").select("*").eq("mobile", me.mobile).eq("report_date", today).maybeSingle();
+      if (body.send) {
+        const { error } = await db.from("coordinator_reports").upsert(
+          { mobile: me.mobile, report_date: today, calls, talked, note: clean(body.note), created_at: new Date().toISOString() }, { onConflict: "mobile,report_date" });
+        if (error) throw error;
+        return json({ ok: true, calls, talked });
+      }
+      const past = await all("coordinator_reports", "*", (q) => q.eq("mobile", me.mobile).order("report_date", { ascending: false }).limit(14));
+      return json({ today, calls, talked, sent: sentRow ?? null, past });
+    }
+    if (action === "dc_reports") {
+      if (!isTop) return json({ error: "not_allowed" }, 403);
+      const leaders = await all("leaders", "mobile, name, district", (q) => q.eq("role", "dc"));
+      const by = new Map(leaders.map((l) => [l.mobile, l]));
+      const rows = await all("coordinator_reports", "*", (q) => q.order("report_date", { ascending: false }).order("created_at", { ascending: false }).limit(150));
+      return json({ reports: rows.map((x) => ({ ...x, name: by.get(x.mobile)?.name ?? x.mobile, district: by.get(x.mobile)?.district ?? "" })) });
+    }
+
+    // ---- Leader's own profile: photo, name, post in the party, birthday, marriage ----
+    if (action === "profile") {
+      const { data: reqs } = await db.from("leader_profile_requests").select("*").eq("mobile", me.mobile).order("submitted_at", { ascending: false }).limit(1);
+      const latest = reqs?.[0] ?? null;
+      return json({ leader: me, latest, photo_url: await signed(latest?.status === "pending" && latest.photo_path ? latest.photo_path : me.photo_path) });
+    }
+    if (action === "profile_save") {
+      const name = clean(body.name, 80);
+      if (!name) return json({ error: "name_required" }, 400);
+      const isDate = (v: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(v ?? ""));
+      const photo = ownPath(body.photo_path);
+      const row: any = {
+        name, position: clean(body.position, 120), dob: isDate(body.dob) ? body.dob : null,
+        gender: ["male", "female", "other"].includes(String(body.gender)) ? body.gender : null,
+        married: typeof body.married === "boolean" ? body.married : null,
+        anniversary: body.married === true && isDate(body.anniversary) ? body.anniversary : null,
+      };
+      if (me.role === "president") {
+        // The President's own name and photo change at once; nobody approves them.
+        if (photo) row.photo_path = photo;
+        const { error } = await db.from("leaders").update(row).eq("mobile", me.mobile);
+        if (error) throw error;
+        return json({ ok: true, applied: true });
+      }
+      const { data: open } = await db.from("leader_profile_requests").select("id, photo_path").eq("mobile", me.mobile).eq("status", "pending").limit(1);
+      const reqRow = { ...row, mobile: me.mobile, photo_path: photo ?? open?.[0]?.photo_path ?? me.photo_path ?? null, status: "pending", submitted_at: new Date().toISOString() };
+      const res = open?.[0]
+        ? await db.from("leader_profile_requests").update(reqRow).eq("id", open[0].id)
+        : await db.from("leader_profile_requests").insert(reqRow);
+      if (res.error) throw res.error;
+      return json({ ok: true, applied: false });
+    }
+
+    // ---- Ask for this account and its data to be deleted ----
+    if (action === "delete_request") {
+      const { data: open } = await db.from("deletion_requests").select("id, created_at").eq("mobile", me.mobile).eq("status", "pending").limit(1);
+      if (body.check) return json({ pending: !!open?.length });
+      if (!open?.length) await db.from("deletion_requests").insert({ mobile: me.mobile, name: me.name, reason: clean(body.reason, 500), source: "app" });
+      return json({ ok: true, pending: true });
     }
 
     return json({ error: "unknown_action" }, 400);

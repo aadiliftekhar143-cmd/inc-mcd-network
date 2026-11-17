@@ -20,7 +20,7 @@ object Store {
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("ward_sadasya", Context.MODE_PRIVATE)
     fun token(ctx: Context): String? = prefs(ctx).getString("token", null)
     fun setToken(ctx: Context, t: String?) = prefs(ctx).edit().putString("token", t).apply()
-    /** member, president, gs, dp or observer. */
+    /** member, president, gs, dc, dp or observer. */
     fun role(ctx: Context): String = prefs(ctx).getString("role", "member") ?: "member"
     fun setRole(ctx: Context, r: String) = prefs(ctx).edit().putString("role", r).apply()
 
@@ -33,6 +33,8 @@ object Store {
         prefs(ctx).edit().putString("profiles", org.json.JSONArray(list).toString()).apply()
     /** The profile not open right now, if this number has two. */
     fun otherProfile(ctx: Context): JSONObject? = profiles(ctx).firstOrNull { it.optString("role") != role(ctx) }
+    /** Every other profile this number holds (a number can be a ward member and hold a leader post). */
+    fun otherProfiles(ctx: Context): List<JSONObject> = profiles(ctx).filter { it.optString("role") != role(ctx) }
     /** Opens one of the stored profiles. */
     fun activate(ctx: Context, p: JSONObject) { setToken(ctx, p.optString("token")); setRole(ctx, p.optString("role", "member")) }
     fun lastPoll(ctx: Context): String? = prefs(ctx).getString("last_poll", null)
