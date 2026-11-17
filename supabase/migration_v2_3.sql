@@ -39,4 +39,40 @@ alter table task_responses enable row level security;
 drop policy if exists admin_all on task_responses;
 create policy admin_all on task_responses for all to authenticated using (is_admin()) with check (is_admin());
 
--- member_stats counts a sent reply as a full task. Easiest way to refresh the view: run schema.sql once after this file.
+-- member_stats counts a sent reply as a full task.
+drop view if exists member_stats;
+create view member_stats with (security_invoker = true) as
+select m.mobile, m.name, m.ward_no, m.ward_name, m.zone, coalesce(m.district, m.zone) as district, m.assembly, m.active,
+       m.first_login_at, m.last_active_at,
+       coalesce(c.tasks_done, 0) as tasks_done,
+       coalesce(med.videos, 0)   as videos,
+       coalesce(med.photos, 0)   as photos,
+       coalesce(sh.shares, 0)    as shares,
+       (coalesce(sh.shares, 0) * 100 + coalesce(c.full_tasks, 0) * 100 + coalesce(st.approved, 0) * 100) as points,
+       coalesce(c.full_tasks, 0) as full_tasks,
+       coalesce(st.approved, 0) as own_tasks,
+       c.last_completed_at, m.block_no, m.is_applicant
+from members m
+left join (
+  -- A full task: 2 photos + 2 videos for an upload task, or the reply sent for a checklist or written task.
+  select cc.mobile, count(*) as tasks_done, max(cc.completed_at) as last_completed_at,
+         count(*) filter (where (cc.video_count >= 2 and cc.photo_count >= 2) or t.kind in ('choice','text')) as full_tasks
+  from completions cc join tasks t on t.id = cc.task_id group by cc.mobile
+) c on c.mobile = m.mobile
+left join (
+  select mobile,
+         count(*) filter (where kind = 'video') as videos,
+         count(*) filter (where kind = 'photo') as photos
+  from media group by mobile
+) med on med.mobile = m.mobile
+left join (
+  select mobile, count(*) as shares from share_events group by mobile
+) sh on sh.mobile = m.mobile
+left join (
+  select mobile, count(*) as approved from member_tasks where status = 'approved' group by mobile
+) st on st.mobile = m.mobile;
+
+-- Settings update for v2.3
+update settings set value = '2.3' where key = 'app_version_name';
+update settings set value = '14' where key = 'app_version_code';
+update settings set value = 'INC MCD NETWORK v2.3: चेकलिस्ट और लिखित उत्तर वाले नए टास्क, एकीकृत टास्क फ़नल, लीडर टास्क प्रगति काउंट, और प्ले स्टोर अनुरूपता।' where key = 'app_update_notes';
