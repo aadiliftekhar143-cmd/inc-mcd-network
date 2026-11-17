@@ -22,6 +22,9 @@ export default function Dashboard() {
   const [wardSearch, setWardSearch] = useState('');
   const [openMember, setOpenMember] = useState(null);
   const [updated, setUpdated] = useState(null);
+  const [master, setMaster] = useState([]);       // wards master: ward_no, ward_name, district, assembly
+
+  useEffect(() => { fetchAll('wards', 'ward_no, ward_name, district, assembly').then(setMaster).catch(() => {}); }, []);
 
   async function load() {
     const [m, d, wd, h] = await Promise.all([
@@ -125,8 +128,18 @@ export default function Dashboard() {
   const districtList = useMemo(() => {
     const set = new Set();
     members.forEach((m) => { if (m.district || m.zone) set.add(m.district || m.zone); });
+    master.forEach((w) => { if (w.district) set.add(w.district); });
     return Array.from(set).sort();
-  }, [members]);
+  }, [members, master]);
+
+  // Wards for the ward dropdown: every ward, or only the wards of the chosen district.
+  const wardOptions = useMemo(() => {
+    const info = new Map();
+    master.forEach((w) => info.set(w.ward_no, { no: w.ward_no, name: w.ward_name, district: w.district }));
+    members.forEach((m) => { if (!info.has(m.ward_no)) info.set(m.ward_no, { no: m.ward_no, name: m.ward_name, district: m.district || m.zone }); });
+    const all = info.size ? [...info.values()] : WARDS.map((no) => ({ no }));
+    return all.filter((w) => selectedDistrict === 'all' || w.district === selectedDistrict).sort((a, b) => a.no - b.no);
+  }, [master, members, selectedDistrict]);
 
   // Star rating distribution counts
   const starCounts = useMemo(() => {
@@ -248,22 +261,20 @@ export default function Dashboard() {
       <div className="filters" style={{ justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <label htmlFor="dist">District</label>
-          <select id="dist" value={selectedDistrict} onChange={(e) => setSelectedDistrict(e.target.value)}>
+          <select id="dist" value={selectedDistrict} onChange={(e) => { setSelectedDistrict(e.target.value); setWard('all'); }}>
             <option value="all">All Districts</option>
             {districtList.map((d) => <option key={d} value={d}>{d}</option>)}
           </select>
 
           <label htmlFor="ward">Ward</label>
           <select id="ward" value={ward} onChange={(e) => setWard(e.target.value)} style={{ minWidth: 160 }}>
-            <option value="all">All 250 wards</option>
-            {WARDS.map((w) => <option key={w} value={w}>{wardLabel(w)}</option>)}
+            <option value="all">{selectedDistrict === 'all' ? 'All 250 wards' : `All ${wardOptions.length} wards of ${selectedDistrict}`}</option>
+            {wardOptions.map((w) => <option key={w.no} value={w.no}>{wardLabel(w.no)}{w.name ? ' · ' + w.name : ''}</option>)}
           </select>
 
-          <label htmlFor="day">Day</label>
-          <select id="day" value={day} onChange={(e) => setDay(e.target.value)}>
-            {!days.find((d) => d.task_date === istToday()) && <option value={istToday()}>Today ({dayLabel(istToday())})</option>}
-            {days.map((d, i) => <option key={d.task_date} value={d.task_date}>Day {i + 1} · {dayLabel(d.task_date)}{d.task_date === istToday() ? ' (today)' : ''}</option>)}
-          </select>
+          <label htmlFor="day">Date</label>
+          <input id="day" type="date" value={day} max={istToday()} onChange={(e) => setDay(e.target.value || istToday())} />
+          {day !== istToday() && <button className="btn ghost" style={{ minHeight: 34, padding: '4px 10px', fontSize: 12.5 }} onClick={() => setDay(istToday())}>Today</button>}
         </div>
 
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>

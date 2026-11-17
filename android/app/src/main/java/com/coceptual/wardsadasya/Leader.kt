@@ -53,7 +53,14 @@ private val STATUS = mapOf("active" to "एक्टिव", "slow" to "धी�
 private val STATUS_COLOR = mapOf("active" to Color(0xFF1D8A4B), "slow" to Color(0xFFC48612), "inactive" to Color(0xFFC03E2A), "never" to Color(0xFF6B7590))
 private val WARD_COLOR = mapOf("strong" to Color(0xFF1D8A4B), "ok" to Color(0xFF58A97A), "weak" to Color(0xFFD9A63A), "none" to Color(0xFFC03E2A))
 private val WARD_LABEL = mapOf("strong" to "मज़बूत", "ok" to "ठीक", "weak" to "कमज़ोर", "none" to "कोई एक्टिव नहीं")
-private val LEVEL_HI = mapOf("gs" to "महासचिव", "dp" to "ज़िला अध्यक्ष", "observer" to "विधानसभा ऑब्ज़र्वर")
+private val LEVEL_HI = mapOf("gs" to "महासचिव", "dc" to "ज़िला कोऑर्डिनेटर", "dp" to "ज़िला अध्यक्ष", "observer" to "विधानसभा ऑब्ज़र्वर", "block" to "ब्लॉक अध्यक्ष", "member" to "वार्ड सदस्य")
+private val LEVEL_ORDER = listOf("gs", "dc", "dp", "observer", "block", "member")
+/** What an observer can tick about a visit, and about a ward member in the monthly feedback. */
+private val VISIT_ACTIVITIES = listOf("कार्यकर्ताओं से मिले", "वार्ड सदस्य के साथ बैठक की", "घर घर संपर्क किया", "स्थानीय समस्या देखी", "कार्यक्रम में शामिल हुए", "बूथ टीम से मिले", "आम लोगों से बात की")
+private val FEEDBACK_FLAGS = listOf("ज़मीन पर सक्रिय हैं", "पार्टी के लिए अच्छा काम कर रहे हैं", "नियमित फ़ील्ड विज़िट करते हैं", "लोगों से जुड़ाव अच्छा है", "बूथ टीम तैयार है")
+private fun ordinal(n: Int) = when (n) { 1 -> "पहले"; 2 -> "दूसरे"; 3 -> "तीसरे"; 4 -> "चौथे"; 5 -> "पाँचवें"; 6 -> "छठे"; else -> "${n}वें" }
+/** "अक्टूबर 2026" from 2026-10-01. */
+private fun monthLabel(ymd: String?): String = parseYmd(ymd.orEmpty())?.let { "${HI_MONTHS[it.get(java.util.Calendar.MONTH)]} ${it.get(java.util.Calendar.YEAR)}" } ?: ""
 
 /** Screens opened on top of the tabs. */
 private data class Page(val kind: String, val arg: String? = null)
@@ -67,11 +74,12 @@ private class LeaderCtx(
     val message: (Callee, String) -> Unit,
     val personal: Pair<Callee, String>?,
     val reload: () -> Unit,
+    val goTab: (Int) -> Unit = {},
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun LeaderApp(role: String, onLogout: () -> Unit, onSwitch: (() -> Unit)? = null, openInbox: MutableState<Boolean> = mutableStateOf(false)) {
+internal fun LeaderApp(role: String, onLogout: () -> Unit, others: List<JSONObject> = emptyList(), onSwitchTo: (JSONObject) -> Unit = {}, openInbox: MutableState<Boolean> = mutableStateOf(false)) {
     val ctx = LocalContext.current
     var me by remember { mutableStateOf<JSONObject?>(null) }
     var ov by remember { mutableStateOf<JSONObject?>(null) }
@@ -84,11 +92,26 @@ internal fun LeaderApp(role: String, onLogout: () -> Unit, onSwitch: (() -> Unit
     val scope = rememberCoroutineScope()
     var personal by remember { mutableStateOf<Pair<Callee, String>?>(null) }
     var lastBack by remember { mutableLongStateOf(0L) }
+    // Unread inbox count, kept on its own so the red dot appears and clears without reloading everything.
+    var unread by remember { mutableIntStateOf(0) }
+    var meKey by remember { mutableIntStateOf(0) }
+    var askDelete by remember { mutableStateOf(false) }
+    if (askDelete) DeleteAccountDialog(leader = true) { askDelete = false }
+    LaunchedEffect(meKey) {
+        if (meKey > 0) try { val m = Api.leader(ctx, "me"); me = m; unread = m.optInt("unread_inbox") } catch (_: Exception) {}
+    }
+    // Coming back to the app: check for new messages.
+    val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e -> if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) meKey++ }
+        lifecycle.addObserver(obs)
+        onDispose { lifecycle.removeObserver(obs) }
+    }
 
     LaunchedEffect(reloadKey) {
         loading = true; error = null
         try {
-            me = Api.leader(ctx, "me")
+            me = Api.leader(ctx, "me").also { unread = it.optInt("unread_inbox") }
             ov = Api.leader(ctx, "overview")
         } catch (e: ApiError) {
             if (e.code == "unauthorized") onLogout() else error = "डेटा लोड नहीं हुआ (${e.code})"
@@ -102,7 +125,7 @@ internal fun LeaderApp(role: String, onLogout: () -> Unit, onSwitch: (() -> Unit
     BackHandler {
         when {
             drawer.isOpen -> scope.launch { drawer.close() }
-            stack.isNotEmpty() -> { if (stack.last().kind == "inbox") reloadKey++; stack.removeAt(stack.lastIndex) }
+            stack.isNotEmpty() -> { if (stack.last().kind == "inbox") { unread = 0; meKey++ }; stack.removeAt(stack.lastIndex) }
             tab != 0 -> tab = 0
             System.currentTimeMillis() - lastBack < 2000 -> (ctx as? Activity)?.finish()
             else -> { lastBack = System.currentTimeMillis(); Toast.makeText(ctx, "ऐप बंद करने के लिए फिर से वापस दबाएं", Toast.LENGTH_SHORT).show() }
@@ -122,17 +145,20 @@ internal fun LeaderApp(role: String, onLogout: () -> Unit, onSwitch: (() -> Unit
     }
     val leader = m.optJSONObject("leader") ?: JSONObject()
     val lc = LeaderCtx(role, leader, o, open = { stack.add(it) }, call = caller,
-        message = { c, preset -> personal = c to preset; stack.add(Page("personal")) }, personal = personal, reload = { reloadKey++ })
+        message = { c, preset -> personal = c to preset; stack.add(Page("personal")) }, personal = personal, reload = { reloadKey++ }, goTab = { tab = it })
 
     val top = stack.lastOrNull()
     if (top != null) {
-        LeaderPage(top, lc, onBack = { if (top.kind == "inbox") reloadKey++; stack.removeAt(stack.lastIndex) }, onLogout = onLogout)
+        // Opening the inbox marks everything read on the server, so the dot goes as soon as it is opened.
+        LaunchedEffect(top.kind) { if (top.kind == "inbox") unread = 0 }
+        LeaderPage(top, lc, onBack = { if (top.kind == "inbox") meKey++; if (top.kind == "profile") meKey++; stack.removeAt(stack.lastIndex) }, onLogout = onLogout)
         return
     }
 
     val tabs = when (role) {
         "president" -> listOf(Icons.Filled.Home to "होम", Icons.Filled.Leaderboard to "प्रदर्शन", Icons.Filled.Map to "ज़िले", Icons.Filled.Star to "ऑब्ज़र्वर", Icons.Filled.GridView to "वार्ड")
-        "gs" -> listOf(Icons.Filled.Home to "होम", Icons.Filled.Map to "ज़िला अध्यक्ष", Icons.Filled.Star to "ऑब्ज़र्वर", Icons.Filled.Groups to "सदस्य", Icons.Filled.TaskAlt to "टास्क")
+        "gs" -> listOf(Icons.Filled.Home to "होम", Icons.Filled.SupportAgent to "कोऑर्डिनेटर", Icons.Filled.Map to "ज़िला अध्यक्ष", Icons.Filled.Star to "ऑब्ज़र्वर", Icons.Filled.Groups to "सदस्य", Icons.Filled.TaskAlt to "टास्क")
+        "dc" -> listOf(Icons.Filled.Home to "होम", Icons.Filled.Map to "ज़िला अध्यक्ष", Icons.Filled.Star to "ऑब्ज़र्वर", Icons.Filled.Groups to "सदस्य", Icons.Filled.EditNote to "रिपोर्ट")
         "dp" -> listOf(Icons.Filled.Home to "होम", Icons.Filled.TaskAlt to "टास्क", Icons.Filled.Star to "ऑब्ज़र्वर", Icons.Filled.Groups to "सदस्य", Icons.Filled.Mail to "मैसेज")
         else -> listOf(Icons.Filled.Home to "होम", Icons.Filled.TaskAlt to "टास्क", Icons.Filled.EditNote to "रिपोर्ट", Icons.Filled.Groups to "सदस्य", Icons.Filled.Mail to "मैसेज")
     }
@@ -153,7 +179,13 @@ internal fun LeaderApp(role: String, onLogout: () -> Unit, onSwitch: (() -> Unit
                 add(Triple(Icons.Filled.EditNote, "फ़ील्ड रिपोर्ट") { stack.add(Page("reports")) })
                 add(Triple(Icons.Filled.Call, "मेरी कॉल") { stack.add(Page("calls")) })
             }
+            "dc" -> {
+                add(Triple(Icons.Filled.EditNote, "आज की रिपोर्ट भेजें") { tab = 4 })
+                add(Triple(Icons.Filled.TaskAlt, "मेरे टास्क") { stack.add(Page("my_tasks")) })
+                add(Triple(Icons.Filled.Call, "मेरी कॉल") { stack.add(Page("calls")) })
+            }
             "dp" -> {
+                add(Triple(Icons.Filled.Leaderboard, "ज़िलेवार रैंकिंग") { stack.add(Page("district_ranks")) })
                 add(Triple(Icons.Filled.Campaign, "मैसेज या वॉइस नोट भेजें") { stack.add(Page("compose")) })
                 add(Triple(Icons.Filled.AddTask, "ऑब्ज़र्वर को टास्क दें") { stack.add(Page("task_create")) })
                 add(Triple(Icons.Filled.Lightbulb, "नया टास्क सुझाएं") { stack.add(Page("task_create", "suggest")) })
@@ -168,11 +200,12 @@ internal fun LeaderApp(role: String, onLogout: () -> Unit, onSwitch: (() -> Unit
                 add(Triple(Icons.Filled.Call, "मेरी कॉल") { stack.add(Page("calls")) })
             }
         }
-        add(Triple(Icons.Filled.Outbox, "भेजे गए मैसेज") { stack.add(Page("sent")) })
+        if (role != "dc") add(Triple(Icons.Filled.Outbox, "भेजे गए मैसेज") { stack.add(Page("sent")) })
         // The President sends; nobody above him writes to his inbox. What people send him is under "लोगों के संदेश".
         if (role != "president") add(Triple(Icons.Filled.MarkEmailUnread, "मेरा इनबॉक्स") { stack.add(Page("inbox")) })
-        if (onSwitch != null) add(Triple(Icons.Filled.SwitchAccount, "वार्ड सदस्य प्रोफ़ाइल खोलें") { onSwitch() })
         add(Triple(Icons.Filled.Person, "मेरी प्रोफ़ाइल") { stack.add(Page("profile")) })
+        add(Triple(Icons.Filled.PrivacyTip, "गोपनीयता नीति") { openLink(ctx, PRIVACY_URL) })
+        add(Triple(Icons.Filled.DeleteForever, "खाता हटाएं") { askDelete = true })
         add(Triple(Icons.AutoMirrored.Filled.Logout, "लॉगआउट") { onLogout() })
     }
 
@@ -180,10 +213,12 @@ internal fun LeaderApp(role: String, onLogout: () -> Unit, onSwitch: (() -> Unit
         drawerState = drawer,
         drawerContent = {
             SideMenu(
-                name = leader.optString("name"), sub = ROLE_HI[role] ?: role,
-                items = menu.map { (ic, label, act) ->
-                    MenuItem(ic, label, badge = if (label == "मेरा इनबॉक्स") m.optInt("unread_inbox") else 0, danger = label == "लॉगआउट", onClick = act)
-                },
+                name = leader.optString("name"), sub = leader.str("position") ?: (ROLE_HI[role] ?: role), photo = m.str("photo_url"),
+                // Switching to the other profile on this number sits on top, in its own colour.
+                items = others.map { o -> MenuItem(Icons.Filled.SwitchAccount, "अपनी ${profileLabel(o)} वाली प्रोफ़ाइल पर स्विच करें", highlight = true) { onSwitchTo(o) } } +
+                    menu.map { (ic, label, act) ->
+                        MenuItem(ic, label, badge = if (label == "मेरा इनबॉक्स") unread else 0, danger = label == "लॉगआउट", onClick = act)
+                    },
                 close = { scope.launch { drawer.close() } },
             )
         },
@@ -193,7 +228,7 @@ internal fun LeaderApp(role: String, onLogout: () -> Unit, onSwitch: (() -> Unit
         topBar = {
             Row(Modifier.fillMaxWidth().background(Navy).padding(start = 4.dp, end = 8.dp, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { scope.launch { drawer.open() } }) {
-                    BadgedBox(badge = { if (m.optInt("unread_inbox") > 0) Badge(containerColor = Color(0xFFE5402F)) }) {
+                    BadgedBox(badge = { if (unread > 0 && role != "president") Badge(containerColor = Color(0xFFE5402F)) }) {
                         Icon(Icons.Filled.Menu, "मेन्यू", tint = Color.White)
                     }
                 }
@@ -206,7 +241,7 @@ internal fun LeaderApp(role: String, onLogout: () -> Unit, onSwitch: (() -> Unit
                     Text(ROLE_HI[role] ?: role, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
                     Text(
                         "${leader.optString("name")}" + when (role) {
-                            "dp" -> " · ${leader.optString("district")}"
+                            "dp", "dc" -> " · ${leader.optString("district")}"
                             "observer" -> " · ${leader.optString("assembly")}"
                             else -> " · पूरी दिल्ली"
                         },
@@ -227,17 +262,18 @@ internal fun LeaderApp(role: String, onLogout: () -> Unit, onSwitch: (() -> Unit
                 )
                 tabs.forEachIndexed { i, (ic, label) ->
                     NavigationBarItem(selected = tab == i, onClick = { tab = i }, colors = colors,
-                        icon = { Icon(ic, null) }, label = { Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) })
+                        icon = { Icon(ic, null) }, label = { Text(label, fontSize = if (tabs.size > 5) 9.5.sp else 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false) })
                 }
             }
         },
     ) { inner ->
         Column(Modifier.fillMaxSize().padding(inner).verticalScroll(rememberScrollState()).padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             when (role) {
-                "president" -> when (tab) { 0 -> PresidentHome(lc); 1 -> PerformanceTab(lc); 2 -> DistrictsTab(lc); 3 -> ObserversTab(lc, weakFirst = false); else -> WardsTab(lc) }
-                "gs" -> when (tab) { 0 -> GsHome(lc); 1 -> DpsTab(lc); 2 -> ObserversTab(lc, weakFirst = true); 3 -> MembersTab(lc, withDistrict = true); else -> MyTasksTab(lc) }
-                "dp" -> when (tab) { 0 -> DpHome(lc); 1 -> MyTasksTab(lc); 2 -> ObserversTab(lc, weakFirst = false); 3 -> MembersTab(lc, withDistrict = false); else -> MessagesTab(lc) }
-                else -> when (tab) { 0 -> ObserverHome(lc); 1 -> MyTasksTab(lc); 2 -> ReportsTab(lc); 3 -> RatingsTab(lc); else -> MessagesTab(lc) }
+                "president" -> when (tab) { 0 -> PresidentHome(lc); 1 -> PerformanceTab(lc); 2 -> DistrictsTab(lc); 3 -> ObserversTab(lc); else -> WardsTab(lc) }
+                "gs" -> when (tab) { 0 -> GsHome(lc); 1 -> CoordinatorsTab(lc); 2 -> DpsTab(lc); 3 -> ObserversTab(lc); 4 -> MembersTab(lc, withDistrict = true); else -> MyTasksTab(lc) }
+                "dc" -> when (tab) { 0 -> DcHome(lc); 1 -> DpsTab(lc); 2 -> ObserversTab(lc); 3 -> MembersTab(lc, withDistrict = false); else -> DcReportTab(lc) }
+                "dp" -> when (tab) { 0 -> DpHome(lc); 1 -> MyTasksTab(lc); 2 -> ObserversTab(lc); 3 -> MembersTab(lc, withDistrict = false); else -> MessagesTab(lc) }
+                else -> when (tab) { 0 -> ObserverHome(lc); 1 -> MyTasksTab(lc); 2 -> ReportsTab(lc); 3 -> FeedbackTab(lc); else -> MessagesTab(lc) }
             }
             Spacer(Modifier.height(10.dp))
         }
@@ -388,7 +424,8 @@ private fun ObserverRow(a: JSONObject, lc: LeaderCtx, preset: String = "") {
 @Composable
 private fun MemberRow(mb: JSONObject, lc: LeaderCtx, rank: Int? = null) {
     val days = if (mb.isNull("last_active_days")) "कभी लॉगिन नहीं" else if (mb.optInt("last_active_days") == 0) "आज एक्टिव" else "${mb.optInt("last_active_days")} दिन पहले"
-    RowItem(mb.optString("name"), "वार्ड ${mb.optInt("ward_no")} · ${fmtNum(mb.optInt("points"))} अंक · $days", rank = rank,
+    val where = if (!mb.optBoolean("is_applicant", true)) "ब्लॉक अध्यक्ष, ब्लॉक ${mb.optInt("block_no")}" else "वार्ड ${mb.optInt("ward_no")}" + (if (!mb.isNull("block_no")) " · ब्लॉक अध्यक्ष" else "")
+    RowItem(mb.optString("name"), "$where · ${fmtNum(mb.optInt("points"))} अंक · $days", rank = rank,
         onClick = { lc.open(Page("member", mb.optString("mobile"))) }) {
         StatusChip(mb.optString("status")); MsgButton(mb.memberCallee(), lc); CallButton(mb.memberCallee(), lc)
     }
@@ -451,12 +488,13 @@ private fun PerformanceTab(lc: LeaderCtx) {
     var range by remember { mutableStateOf("top5") }
     val ranges = when (level) {
         "district" -> listOf("top5" to "टॉप 5", "bottom5" to "नीचे के 5", "all" to "सभी ज़िले")
+        "block" -> listOf("top10" to "टॉप 10", "top20" to "टॉप 20", "bottom10" to "नीचे के 10", "bottom20" to "नीचे के 20", "all" to "सभी ब्लॉक")
         "assembly" -> listOf("top5" to "टॉप 5", "top10" to "टॉप 10", "top20" to "टॉप 20", "bottom5" to "नीचे के 5", "bottom10" to "नीचे के 10", "bottom20" to "नीचे के 20", "all" to "सभी विधानसभा")
         else -> listOf("top10" to "टॉप 10", "top20" to "टॉप 20", "top50" to "टॉप 50", "bottom10" to "नीचे के 10", "bottom20" to "नीचे के 20", "bottom25" to "नीचे के 25", "bottom50" to "नीचे के 50", "bottom75" to "नीचे के 75", "all" to "सभी वार्ड (रैंकिंग)")
     }
     val rangeNow = if (ranges.any { it.first == range }) range else ranges.first().first
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Picker("स्तर", level, listOf("district" to "संगठनात्मक ज़िले", "assembly" to "विधानसभा", "ward" to "सभी वार्ड"), Modifier.weight(1f)) { level = it }
+        Picker("स्तर", level, listOf("district" to "संगठनात्मक ज़िले", "assembly" to "विधानसभा", "ward" to "सभी वार्ड", "block" to "ब्लॉक"), Modifier.weight(1f)) { level = it }
         Picker("रैंकिंग", rangeNow, ranges, Modifier.weight(1f)) { range = it }
     }
     fun <T> cut(xs: List<T>): List<T> {
@@ -467,6 +505,11 @@ private fun PerformanceTab(lc: LeaderCtx) {
     when (level) {
         "district" -> LCard(title) { cut(lc.ov.optJSONArray("districts").list()).forEach { DistrictRow(it, lc) } }
         "assembly" -> LCard(title) { cut(lc.ov.optJSONArray("assemblies").list()).forEach { ObserverRow(it, lc) } }
+        "block" -> LCard(title) {
+            val blocks = lc.ov.optJSONArray("blocks").list()
+            if (blocks.isEmpty()) Text("ब्लॉक अध्यक्षों की सूची अभी जुड़ी नहीं है। जुड़ते ही हर ब्लॉक का काम यहाँ दिखेगा।", color = Muted, fontSize = 13.5.sp, lineHeight = 20.sp)
+            cut(blocks).forEach { BlockRow(it, lc) }
+        }
         else -> LCard(title) {
             cut(lc.ov.optJSONArray("wards").list()).forEach { w ->
                 RowItem("वार्ड ${w.optInt("no")}${w.str("name")?.let { " · $it" } ?: ""}",
@@ -486,17 +529,30 @@ private fun DistrictsTab(lc: LeaderCtx) {
 }
 
 @Composable
-private fun ObserversTab(lc: LeaderCtx, weakFirst: Boolean) {
+private fun ObserversTab(lc: LeaderCtx) {
     var dist by remember { mutableStateOf("all") }
     var list = lc.ov.optJSONArray("assemblies").list()
     val names = list.map { it.optString("district") }.filter { it.isNotBlank() }.distinct().sorted()
     if (lc.role == "president" || lc.role == "gs") Picker("संगठनात्मक ज़िला", dist, listOf("all" to "सभी ज़िले") + names.map { it to it }) { dist = it }
     if (dist != "all") list = list.filter { it.optString("district") == dist }
-    if (weakFirst) list = list.reversed()
-    LCard("${list.size} ऑब्ज़र्वर", action = { Text(if (weakFirst) "कमज़ोर पहले" else "अच्छे पहले", fontSize = 12.sp, color = Muted) }) {
+    // The ones who need attention come first.
+    list = list.reversed()
+    LCard("${list.size} ऑब्ज़र्वर") {
         Text("स्कोर काम के हिसाब से अपने आप बनता है: सदस्य कितने एक्टिव, रिपोर्ट कितनी और कब।", fontSize = 12.sp, color = Muted)
         list.forEach { ObserverRow(it, lc) }
     }
+}
+
+/** One block (same area as a ward) with its Block President. */
+@Composable
+private fun BlockRow(b: JSONObject, lc: LeaderCtx) {
+    val pr = b.optJSONObject("president")
+    val c = pr?.let { Callee(it.optString("mobile"), it.optString("name"), "ब्लॉक अध्यक्ष, ब्लॉक ${b.optInt("no")}") }
+    RowItem(
+        "ब्लॉक ${b.optInt("no")}${b.str("name")?.let { " · $it" } ?: ""}",
+        "${pr?.optString("name") ?: ""} · ${b.optString("assembly")} · ${fmtNum(b.optInt("points"))} अंक",
+        rank = b.optInt("rank"), onClick = pr?.let { { lc.open(Page("member", it.optString("mobile"))) } },
+    ) { StatusChip(b.optString("status")); MsgButton(c, lc); CallButton(c, lc) }
 }
 
 @Composable
@@ -535,7 +591,7 @@ private fun TaskProgressCard(lc: LeaderCtx) {
     val p = progress ?: return
     if (p.isEmpty()) return
     LCard("टास्क कहाँ तक पहुँचे", action = { TextButton(onClick = { lc.open(Page("tasks_report")) }) { Text("पूरी रिपोर्ट") } }) {
-        listOf("gs", "dp", "observer").forEach { lv ->
+        LEVEL_ORDER.forEach { lv ->
             val ts = p.filter { it.optString("level") == lv }
             val total = ts.sumOf { it.optInt("total") }; val done = ts.sumOf { it.optInt("done") }
             if (total > 0) Bar(LEVEL_HI[lv] ?: lv, done.toFloat() / total, "${done * 100 / total}%")
@@ -555,12 +611,13 @@ private fun GsHome(lc: LeaderCtx) {
     LaunchedEffect(key) { mine = try { Api.leader(ctx, "tasks").optJSONArray("mine").list() } catch (e: Exception) { emptyList() } }
     val due = mine.orEmpty().filter { !it.optBoolean("done") }
     LCard("अध्यक्ष जी के दिए टास्क", action = { Text(if (mine == null) "" else "${due.size} बाकी", fontSize = 12.sp, color = Muted) }) {
+        if (due.isNotEmpty()) PresidentTaskLine()
         if (mine == null) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
         else if (due.isEmpty()) Text("अभी कोई टास्क बाकी नहीं है।", color = Muted, fontSize = 13.sp)
         due.forEach { t ->
             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(t.optString("title"), fontWeight = FontWeight.SemiBold, color = Ink, fontSize = 14.5.sp)
-                Text("$PRESIDENT_NAME की तरफ से" + (t.str("due_date")?.let { " · आख़िरी तारीख़ ${hiDate(it)}" } ?: ""), fontSize = 12.sp, color = Muted)
+                Text(t.optString("title"), fontWeight = FontWeight.Bold, color = Ink, fontSize = 15.5.sp)
+                t.str("due_date")?.let { Text("आख़िरी तारीख़ ${hiDate(it)}", fontSize = 12.sp, color = Muted) }
                 t.str("description")?.let { Text(it, fontSize = 13.sp, color = Color(0xFF3A4560)) }
                 t.str("audio_url")?.let { AudioPlayer(it) }
                 OutlinedButton(onClick = { scope.launch { try { Api.leader(ctx, "task_done", JSONObject().put("task_id", t.optLong("id"))); key++ } catch (_: Exception) {} } },
@@ -587,8 +644,110 @@ private fun GsHome(lc: LeaderCtx) {
 
 @Composable
 private fun DpsTab(lc: LeaderCtx) {
-    LCard("ज़िला अध्यक्ष", action = { Text("कमज़ोर पहले", fontSize = 12.sp, color = Muted) }) {
+    // Weakest district first: that is where the call is needed.
+    LCard("ज़िला अध्यक्ष") {
+        if (lc.role == "dc") Text("आप ज़िला अध्यक्ष से कॉल पर बात कर सकते हैं। रैंक और स्कोर सबके दिख रहे हैं।", fontSize = 12.5.sp, color = Muted, lineHeight = 18.sp)
         lc.ov.optJSONArray("districts").list().reversed().forEach { DistrictRow(it, lc) }
+    }
+}
+
+/** General Secretary: the 14 District Coordinators, how much they called this week, and what they reported. */
+@Composable
+private fun CoordinatorsTab(lc: LeaderCtx) {
+    val ctx = LocalContext.current
+    val list = lc.ov.optJSONArray("coordinators").list()
+    var reports by remember { mutableStateOf<List<JSONObject>?>(null) }
+    LaunchedEffect(Unit) { reports = try { Api.leader(ctx, "dc_reports").optJSONArray("reports").list() } catch (e: Exception) { emptyList() } }
+    LCard("ज़िला कोऑर्डिनेटर", action = { Text("${list.size}", fontSize = 12.sp, color = Muted) }) {
+        if (list.isEmpty()) Text("अभी कोई ज़िला कोऑर्डिनेटर नहीं जुड़ा है। एडमिन पैनल से जुड़ते ही यहाँ दिखेंगे।", color = Muted, fontSize = 13.5.sp, lineHeight = 20.sp)
+        list.forEach { x ->
+            val c = Callee(x.optString("mobile"), x.optString("name"), "ज़िला कोऑर्डिनेटर, ${x.optString("district")}")
+            RowItem(
+                x.optString("name"),
+                "${x.optString("district")}${if (!x.isNull("district_rank")) " · ज़िला रैंक ${x.optInt("district_rank")}" else ""}\nइस हफ़्ते ${x.optInt("calls_7")} कॉल, ${x.optInt("talked_7")} से बात · " +
+                    (x.str("last_report")?.let { "आख़िरी रिपोर्ट ${hiDate(it)}" } ?: "कोई रिपोर्ट नहीं"),
+            ) {
+                if (!x.optBoolean("logged")) Chip("लॉगिन नहीं", Ground, Muted)
+                CallButton(c, lc)
+            }
+        }
+    }
+    LCard("कोऑर्डिनेटर की रिपोर्ट") {
+        val rs = reports
+        if (rs == null) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        else if (rs.isEmpty()) Text("अभी कोई रिपोर्ट नहीं आई।", color = Muted, fontSize = 13.sp)
+        else rs.take(40).forEach { x ->
+            Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                Text("${x.optString("name")} · ${x.optString("district")}", fontWeight = FontWeight.Bold, color = Ink, fontSize = 14.5.sp)
+                Text("${hiDate(x.str("report_date"))} · ${x.optInt("calls")} कॉल की, ${x.optInt("talked")} से बात हुई", fontSize = 12.5.sp, color = Muted)
+                x.str("note")?.let { Text(it, fontSize = 14.sp, color = Ink, lineHeight = 21.sp) }
+                HorizontalDivider(color = Color(0xFFF0F2F6), modifier = Modifier.padding(top = 6.dp))
+            }
+        }
+    }
+}
+
+// ================================================================ District Coordinator
+
+@Composable
+private fun DcHome(lc: LeaderCtx) {
+    val mine = lc.ov.optJSONArray("districts").list().firstOrNull { it.optString("name").trim().equals(lc.me.optString("district").trim(), ignoreCase = true) }
+    LCard("${lc.me.optString("district")} ज़िला", action = { mine?.let { GradeBadge(it.optInt("score"), it.optString("grade"), big = true) } }) {
+        if (mine != null) Text("${lc.ov.optJSONArray("districts").list().size} ज़िलों में ${ordinal(mine.optInt("rank"))} नंबर पर · ${mine.optInt("active")} एक्टिव / ${mine.optInt("total")} सदस्य", fontSize = 13.sp, color = Muted)
+        else Text("इस ज़िले के सदस्य अभी सूची में नहीं हैं।", fontSize = 13.sp, color = OrangeText)
+        Text("आप सिर्फ़ महासचिव को रिपोर्ट करते हैं। आपका काम कॉल करके बात करना और रोज़ की रिपोर्ट भेजना है।", fontSize = 13.sp, color = Ink, lineHeight = 20.sp)
+    }
+    PendingTasksBanner(lc)
+    val ms = lc.ov.optJSONArray("members").list()
+    Kpis(listOf(
+        "${lc.ov.optJSONArray("assemblies").list().count { it.optJSONObject("observer") != null }}" to "ऑब्ज़र्वर", "${ms.count { it.optBoolean("is_applicant", true) }}" to "वार्ड सदस्य",
+        "${ms.count { !it.isNull("block_no") }}" to "ब्लॉक अध्यक्ष", "${ms.count { it.optString("status") != "active" }}" to "जिनसे बात ज़रूरी है",
+    ))
+    Button(onClick = { lc.goTab(4) }, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Navy)) {
+        Icon(Icons.Filled.EditNote, null); Text("  आज की रिपोर्ट भेजें", fontWeight = FontWeight.Bold)
+    }
+    lc.ov.optJSONObject("gs")?.let { gs ->
+        LCard("महासचिव") { RowItem(gs.optString("name"), gs.optString("mobile")) { CallButton(Callee(gs.optString("mobile"), gs.optString("name"), "महासचिव"), lc) } }
+    }
+}
+
+/** Today's calling report: the counts come from the calls made in the app; the coordinator adds a note and sends it. */
+@Composable
+private fun DcReportTab(lc: LeaderCtx) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var data by remember { mutableStateOf<JSONObject?>(null) }
+    var key by remember { mutableIntStateOf(0) }
+    var note by remember { mutableStateOf("") }
+    var sending by remember { mutableStateOf(false) }
+    LaunchedEffect(key) {
+        data = try { Api.leader(ctx, "dc_report") } catch (e: Exception) { JSONObject() }
+        data?.optJSONObject("sent")?.str("note")?.let { if (note.isBlank()) note = it }
+    }
+    val d = data ?: run { CircularProgressIndicator(color = Orange); return }
+    val sent = d.optJSONObject("sent")
+    LCard("आज की रिपोर्ट", action = { TextButton(onClick = { key++ }) { Text("रीफ्रेश") } }) {
+        Kpis(listOf("${d.optInt("calls")}" to "आज कॉल की", "${d.optInt("talked")}" to "से बात हुई"))
+        Text("यह गिनती ऐप से की गई कॉल से अपने आप बनती है। कॉल के बाद \"बात हो गई\" चुनना न भूलें।", fontSize = 12.5.sp, color = Muted, lineHeight = 18.sp)
+        OutlinedTextField(note, { note = it.take(1500) }, label = { Text("आज किससे क्या बात हुई (चाहें तो लिखें)") }, minLines = 4, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+        Button(
+            onClick = {
+                sending = true
+                scope.launch {
+                    try {
+                        Api.leader(ctx, "dc_report", JSONObject().put("send", true).put("note", note.trim()))
+                        Toast.makeText(ctx, "रिपोर्ट महासचिव को भेज दी गई", Toast.LENGTH_LONG).show(); key++
+                    } catch (e: Exception) { Toast.makeText(ctx, "भेजा नहीं जा सका, इंटरनेट चेक करें", Toast.LENGTH_LONG).show() }
+                    sending = false
+                }
+            },
+            enabled = !sending, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Navy),
+        ) { Icon(Icons.AutoMirrored.Filled.Send, null); Text(if (sending) "  भेजा जा रहा है…" else if (sent != null) "  रिपोर्ट दोबारा भेजें" else "  महासचिव को रिपोर्ट भेजें", fontWeight = FontWeight.Bold) }
+        if (sent != null) Text("आज की रिपोर्ट जा चुकी है (${sent.optInt("calls")} कॉल, ${sent.optInt("talked")} से बात)। और कॉल करने के बाद दोबारा भेज सकते हैं।", fontSize = 12.5.sp, color = GreenText, lineHeight = 18.sp)
+    }
+    val past = d.optJSONArray("past").list()
+    if (past.isNotEmpty()) LCard("पिछली रिपोर्ट") {
+        past.forEach { x -> RowItem(hiDate(x.str("report_date")), "${x.optInt("calls")} कॉल, ${x.optInt("talked")} से बात" + (x.str("note")?.let { "\n$it" } ?: "")) }
     }
 }
 
@@ -597,7 +756,17 @@ private fun MembersTab(lc: LeaderCtx, withDistrict: Boolean) {
     var filter by remember { mutableStateOf("all") }
     var dist by remember { mutableStateOf("all") }
     var shown by remember { mutableIntStateOf(40) }
+    var who by remember { mutableStateOf("member") }
     var ms = lc.ov.optJSONArray("members").list()
+    val blockCount = ms.count { !it.isNull("block_no") }
+    if (blockCount > 0) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf("member" to "वार्ड सदस्य", "block" to "ब्लॉक अध्यक्ष").forEach { (k, l) ->
+            Text(l, fontSize = 14.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, color = if (who == k) Color.White else Navy,
+                modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(if (who == k) Navy else Color.White).border(1.dp, if (who == k) Navy else Line, RoundedCornerShape(12.dp))
+                    .clickable { who = k; shown = 40 }.padding(vertical = 10.dp))
+        }
+    }
+    ms = if (who == "block" && blockCount > 0) ms.filter { !it.isNull("block_no") } else ms.filter { it.optBoolean("is_applicant", true) }
     if (withDistrict) {
         val names = ms.map { it.optString("district") }.filter { it.isNotBlank() }.distinct().sorted()
         Picker("संगठनात्मक ज़िला", dist, listOf("all" to "सभी ज़िले") + names.map { it to it }) { dist = it; shown = 40 }
@@ -611,7 +780,9 @@ private fun MembersTab(lc: LeaderCtx, withDistrict: Boolean) {
                     .clickable { filter = k; shown = 40 }.padding(horizontal = 12.dp, vertical = 7.dp))
         }
     }
-    val list = (if (filter == "all") ms else ms.filter { it.optString("status") == filter }).sortedByDescending { it.optInt("points") }
+    // Those who need a call come first: never logged in, then stopped, then slow, then active; fewer points first inside each.
+    val order = mapOf("never" to 0, "inactive" to 1, "slow" to 2, "active" to 3)
+    val list = (if (filter == "all") ms else ms.filter { it.optString("status") == filter }).sortedWith(compareBy({ order[it.optString("status")] ?: 0 }, { it.optInt("points") }))
     LCard {
         list.take(shown).forEach { MemberRow(it, lc) }
         if (list.isEmpty()) Text("कोई सदस्य नहीं", color = Muted)
@@ -627,14 +798,18 @@ private fun DpHome(lc: LeaderCtx) {
     val all = lc.ov.optJSONArray("district_ranks").list()
     if (d == null) { LCard { Text("आपका ज़िला (${lc.me.optString("district")}) सदस्य सूची में नहीं मिला। एडमिन से ज़िले का नाम ठीक करवाएं।", color = OrangeText) }; return }
     val ahead = all.firstOrNull { it.optInt("rank") == d.optInt("rank") - 1 }
-    LCard {
-        Text("${all.size} में से रैंक ${d.optInt("rank")}" + (ahead?.let { " · आगे वाला ज़िला: ${it.optString("name")} (${it.optInt("score")})" } ?: " · आप सबसे आगे हैं"), fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+    LCard(action = { TextButton(onClick = { lc.open(Page("district_ranks")) }) { Text("सभी ज़िले") } }, title = "आपके ज़िले की रैंक") {
+        Text("आपका ज़िला ${all.size} में से ${ordinal(d.optInt("rank"))} नंबर पर है।", fontSize = 16.sp, lineHeight = 23.sp, fontWeight = FontWeight.Bold, color = Ink)
+        Text(
+            ahead?.let { a -> "आपसे ठीक ऊपर ${a.optString("name")} है" + (a.optInt("score") - d.optInt("score")).let { diff -> if (diff > 0) ", $diff अंक आगे।" else "।" } } ?: "आपका ज़िला सबसे आगे है।",
+            fontSize = 14.sp, color = Muted, lineHeight = 21.sp,
+        )
     }
     PendingTasksBanner(lc)
     LCard("${d.optString("name")} ज़िला", action = { GradeBadge(d.optInt("score"), d.optString("grade"), big = true) }) {
         Text("${d.optInt("active")} एक्टिव / ${d.optInt("total")} सदस्य · हर वार्ड में कोई एक्टिव: ${d.optInt("coverage")}% · इस हफ़्ते ${if (d.optInt("growth") >= 0) "+" else ""}${d.optInt("growth")}%", fontSize = 13.sp, color = Muted)
     }
-    LCard("विधानसभा और ऑब्ज़र्वर") { lc.ov.optJSONArray("assemblies").list().forEach { ObserverRow(it, lc) } }
+    LCard("विधानसभा और ऑब्ज़र्वर") { lc.ov.optJSONArray("assemblies").list().reversed().forEach { ObserverRow(it, lc) } }
     LatestReports(lc, 2)
 }
 
@@ -645,12 +820,9 @@ private fun PendingTasksBanner(lc: LeaderCtx) {
     var due by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) { due = try { Api.leader(ctx, "tasks").optJSONArray("mine").list().count { !it.optBoolean("done") } } catch (e: Exception) { 0 } }
     if (due == 0) return
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(OrangeBg).border(1.dp, Color(0xFFF6C9A0), RoundedCornerShape(14.dp)).padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(Icons.Filled.TaskAlt, null, tint = Orange)
-        Text("  $due टास्क $PRESIDENT_NAME की तरफ से आए हैं", fontSize = 13.5.sp, color = OrangeText, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        PresidentTaskLine()
+        Text("$due टास्क बाकी हैं। टास्क टैब में देखें।", fontSize = 13.5.sp, color = OrangeText, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 4.dp))
     }
 }
 
@@ -677,6 +849,7 @@ private fun ObserverHome(lc: LeaderCtx) {
         Text("${lc.ov.optInt("all_assembly_count")} में रैंक ${a.optInt("rank")} · ${a.optString("name")} · ${a.optInt("active")}/${a.optInt("total")} सदस्य एक्टिव", fontSize = 13.sp, color = Muted)
     }
     PendingTasksBanner(lc)
+    FeedbackReminder(lc)
     val wards = lc.ov.optJSONArray("wards").list().sortedBy { it.optInt("score") }
     LCard("इस हफ़्ते कमज़ोर वार्ड") {
         wards.take(5).forEach { w ->
@@ -696,49 +869,108 @@ private fun ReportsTab(lc: LeaderCtx) {
     Button(onClick = { lc.open(Page("report_new")) }, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Navy)) {
         Icon(Icons.Filled.EditNote, null); Text("  नई विज़िट रिपोर्ट", fontWeight = FontWeight.Bold)
     }
-    Text("जहाँ गए वहाँ के बारे में लिखें या बोलें, फोटो और वीडियो डालें। लोकेशन ऐप अपने आप ले लेता है।", fontSize = 12.5.sp, color = Muted)
+    Text("जिस वार्ड में गए वह चुनें, वहाँ क्या किया वह टिक करें, फिर लिखें या बोलें और फोटो या वीडियो जोड़ें।", fontSize = 12.5.sp, color = Muted, lineHeight = 18.sp)
     LatestReports(lc, 30)
 }
 
-/** Observer rates members on what they saw on the ground. */
+/** Members still waiting for this observer's monthly feedback. */
+private fun feedbackLeft(lc: LeaderCtx): Pair<String, Int> {
+    val f = lc.ov.optJSONObject("feedback") ?: return "" to 0
+    val done = f.optJSONArray("done")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
+    val mine = lc.ov.optJSONArray("members").list().filter { it.optBoolean("is_applicant", true) }
+    return monthLabel(f.str("month")) to mine.count { it.optString("mobile") !in done }
+}
+
+/** Stays on the observer's home until the month's feedback on every member is in. */
 @Composable
-private fun RatingsTab(lc: LeaderCtx) {
+private fun FeedbackReminder(lc: LeaderCtx) {
+    val (month, left) = feedbackLeft(lc)
+    if (left == 0 || month.isBlank()) return
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFFFDE8E8)).border(1.dp, Color(0xFFF3B4B4), RoundedCornerShape(14.dp)).clickable { lc.goTab(3) }.padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text("$month की सदस्य रिपोर्ट बाकी है", fontSize = 15.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF9B1C1C))
+        Text("$left सदस्यों पर आपका फ़ीडबैक अभी नहीं आया। सदस्य टैब खोलकर हर सदस्य का फ़ीडबैक दें।", fontSize = 13.5.sp, color = Color(0xFF9B1C1C), lineHeight = 20.sp)
+    }
+}
+
+/** Observer's members, with who still needs this month's feedback. Tapping a member opens their page with the feedback form. */
+@Composable
+private fun FeedbackTab(lc: LeaderCtx) {
+    val f = lc.ov.optJSONObject("feedback")
+    val done = f?.optJSONArray("done")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
+    val month = monthLabel(f?.str("month"))
+    val order = mapOf("never" to 0, "inactive" to 1, "slow" to 2, "active" to 3)
+    val ms = lc.ov.optJSONArray("members").list().filter { it.optBoolean("is_applicant", true) }
+        .sortedWith(compareBy({ if (it.optString("mobile") in done) 1 else 0 }, { order[it.optString("status")] ?: 0 }, { it.optInt("points") }))
+    LCard("$month का फ़ीडबैक", action = { Text("${ms.count { it.optString("mobile") in done }}/${ms.size} दिया", fontSize = 12.5.sp, color = Muted, fontWeight = FontWeight.SemiBold) }) {
+        Text("महीने में एक बार हर सदस्य के बारे में लिखें: ज़मीन पर आपने क्या देखा। $month का फ़ीडबैक इस पूरे महीने दिया जा सकता है।", fontSize = 13.sp, color = Ink, lineHeight = 20.sp)
+        TextButton(onClick = { lc.goTab(2) }, contentPadding = PaddingValues(0.dp)) { Text("फ़ीडबैक देने से पहले अपनी विज़िट रिपोर्ट देख लें") }
+    }
+    LCard {
+        ms.forEach { mb ->
+            val given = mb.optString("mobile") in done
+            RowItem(mb.optString("name"), "वार्ड ${mb.optInt("ward_no")} · ${STATUS[mb.optString("status")] ?: ""}", onClick = { lc.open(Page("member", mb.optString("mobile"))) }) {
+                Chip(if (given) "फ़ीडबैक दिया" else "फ़ीडबैक बाकी", if (given) GreenBg else OrangeBg, if (given) GreenText else OrangeText)
+                CallButton(mb.memberCallee(), lc)
+            }
+        }
+        if (ms.isEmpty()) Text("आपकी विधानसभा में अभी कोई सदस्य नहीं जुड़ा है।", color = Muted)
+    }
+}
+
+/** The feedback form on a member's page: tick what is true, write a few lines, add a voice note. */
+@Composable
+private fun FeedbackForm(member: JSONObject, lc: LeaderCtx) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    val ratings = remember { mutableStateMapOf<String, IntArray>() }
-    LaunchedEffect(Unit) {
+    val mobile = member.optString("mobile")
+    val month = monthLabel(lc.ov.optJSONObject("feedback")?.str("month"))
+    val flags = remember(mobile) { mutableStateListOf<String>() }
+    var note by remember(mobile) { mutableStateOf("") }
+    var voice by remember(mobile) { mutableStateOf<File?>(null) }
+    var oldAudio by remember(mobile) { mutableStateOf<String?>(null) }
+    var saved by remember(mobile) { mutableStateOf(false) }
+    var sending by remember { mutableStateOf(false) }
+    LaunchedEffect(mobile) {
         try {
-            Api.leader(ctx, "my_ratings").optJSONArray("ratings").list().forEach {
-                ratings[it.optString("member_mobile")] = intArrayOf(it.optInt("ground"), it.optInt("connect"), it.optInt("booth"))
+            Api.leader(ctx, "my_feedback").optJSONArray("feedback").list().firstOrNull { it.optString("member_mobile") == mobile }?.let { f ->
+                f.optJSONArray("flags")?.let { a -> (0 until a.length()).forEach { flags.add(a.getString(it)) } }
+                note = f.str("note") ?: ""; oldAudio = f.str("audio_url"); saved = true
             }
         } catch (_: Exception) {}
     }
-    Text("हर सदस्य को ज़मीन पर जो देखा उसके हिसाब से रेटिंग दें।", fontSize = 12.5.sp, color = Muted)
-    val crits = listOf("ज़मीन पर दिखते हैं", "लोगों से जुड़ाव", "बूथ टीम")
-    lc.ov.optJSONArray("members").list().sortedByDescending { it.optInt("points") }.forEach { mb ->
-        LCard {
-            MemberRow(mb, lc)
-            if (mb.optString("status") == "never") Text("अभी लॉगिन नहीं किया। पहले कॉल करें।", fontSize = 12.5.sp, color = Color(0xFF9B1C1C))
-            else crits.forEachIndexed { ci, c ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(c, fontSize = 13.sp, color = Ink, modifier = Modifier.weight(1f))
-                    val cur = ratings[mb.optString("mobile")] ?: intArrayOf(0, 0, 0)
-                    (1..5).forEach { n ->
-                        Icon(if (n <= cur[ci]) Icons.Filled.Star else Icons.Filled.StarBorder, "$n", tint = Gold,
-                            modifier = Modifier.size(28.dp).clickable {
-                                val next = cur.copyOf().also { it[ci] = n }
-                                ratings[mb.optString("mobile")] = next
-                                scope.launch {
-                                    try {
-                                        Api.leader(ctx, "rate", JSONObject().put("member_mobile", mb.optString("mobile"))
-                                            .put("ground", next[0]).put("connect", next[1]).put("booth", next[2]))
-                                    } catch (_: Exception) {}
-                                }
-                            })
-                    }
-                }
+    LCard("सदस्य के लिए अपना फ़ीडबैक दें", action = { if (saved) Chip("दिया जा चुका है", GreenBg, GreenText) }) {
+        Text("$month के काम के बारे में। जो बात सही है उस पर टिक करें।", fontSize = 13.sp, color = Muted, lineHeight = 19.sp)
+        FEEDBACK_FLAGS.forEach { f ->
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { if (f in flags) flags.remove(f) else flags.add(f) }, verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = f in flags, onCheckedChange = { if (it) flags.add(f) else flags.remove(f) }, colors = CheckboxDefaults.colors(checkedColor = Navy))
+                Text(f, fontSize = 14.5.sp, color = Ink)
             }
         }
+        OutlinedTextField(note, { note = it.take(1500) }, label = { Text("अपने फ़ील्ड विज़िट में आपने क्या देखा") }, minLines = 4, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+        oldAudio?.let { if (voice == null) { Text("पहले भेजा गया वॉइस नोट:", fontSize = 12.sp, color = Muted); AudioPlayer(it) } }
+        VoiceNote(voice) { voice = it }
+        val guard = rememberSendGuard()
+        Button(
+            onClick = { guard {
+                if (flags.isEmpty() && note.isBlank() && voice == null) { Toast.makeText(ctx, "कुछ टिक करें, लिखें या बोलें", Toast.LENGTH_SHORT).show(); return@guard }
+                sending = true
+                scope.launch {
+                    try {
+                        val p = JSONObject().put("member_mobile", mobile).put("flags", JSONArray(flags.toList())).put("note", note.trim())
+                        voice?.let { p.put("audio_path", uploadFile(ctx, true, it, "audio", "audio/mp4")) }
+                        Api.leader(ctx, "feedback_save", p)
+                        saved = true
+                        Toast.makeText(ctx, "फ़ीडबैक भेज दिया गया", Toast.LENGTH_LONG).show()
+                        lc.reload()
+                    } catch (e: Exception) { Toast.makeText(ctx, "भेजा नहीं जा सका, इंटरनेट चेक करें", Toast.LENGTH_LONG).show() }
+                    sending = false
+                }
+            } },
+            enabled = !sending, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Navy),
+        ) { Text(if (sending) "भेजा जा रहा है…" else if (saved) "फ़ीडबैक बदलकर भेजें" else "फ़ीडबैक भेजें", fontWeight = FontWeight.Bold) }
     }
 }
 
@@ -755,12 +987,12 @@ private fun MyTasksTab(lc: LeaderCtx) {
     val mine = d.optJSONArray("mine").list()
     val due = mine.filter { !it.optBoolean("done") }; val done = mine.filter { it.optBoolean("done") }
     Kpis(listOf("${due.size}" to "बाकी टास्क", "${done.size}" to "पूरे हुए"))
-    LCard("बाकी", action = { Text("अध्यक्ष जी की तरफ से", fontSize = 11.5.sp, color = Muted) }) {
-        if (due.isEmpty()) Text("सब टास्क पूरे हैं।", color = Muted, fontSize = 13.sp)
+    LCard("बाकी टास्क") {
+        if (due.isEmpty()) Text("सब टास्क पूरे हैं।", color = Muted, fontSize = 13.sp) else PresidentTaskLine()
         due.forEach { t ->
             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(t.optString("title"), fontWeight = FontWeight.Bold, color = Ink, fontSize = 14.5.sp)
-                Text("$PRESIDENT_NAME की तरफ से" + (t.str("due_date")?.let { " · आख़िरी तारीख़ ${hiDate(it)}" } ?: ""), fontSize = 12.sp, color = Muted)
+                Text(t.optString("title"), fontWeight = FontWeight.Bold, color = Ink, fontSize = 15.5.sp)
+                t.str("due_date")?.let { Text("आख़िरी तारीख़ ${hiDate(it)}", fontSize = 12.sp, color = Muted) }
                 t.str("description")?.let { Text(it, fontSize = 13.sp, color = Color(0xFF3A4560)) }
                 t.str("audio_url")?.let { AudioPlayer(it) }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -776,7 +1008,7 @@ private fun MyTasksTab(lc: LeaderCtx) {
     if (done.isNotEmpty()) LCard("पूरे हुए") { done.forEach { RowItem(it.optString("title"), "हो गया") { Icon(Icons.Filled.CheckCircle, null, tint = Green) } } }
     if (lc.role == "gs" || lc.role == "dp") {
         Button(onClick = { lc.open(Page("task_create")) }, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Navy)) {
-            Icon(Icons.Filled.AddTask, null); Text(if (lc.role == "gs") "  ज़िला अध्यक्ष / ऑब्ज़र्वर के लिए टास्क बनाएं" else "  ऑब्ज़र्वर को टास्क दें", fontWeight = FontWeight.Bold)
+            Icon(Icons.Filled.AddTask, null); Text(if (lc.role == "gs") "  नया टास्क बनाएं" else "  ऑब्ज़र्वर को टास्क दें", fontWeight = FontWeight.Bold)
         }
     }
     val created = d.optJSONArray("created").list()
@@ -823,7 +1055,7 @@ private fun SentList() {
     }
 }
 
-private val AUDIENCE_HI = mapOf("all" to "सबको", "gs" to "महासचिव", "dp" to "ज़िला अध्यक्षों को", "observer" to "ऑब्ज़र्वर को", "member" to "वार्ड सदस्यों को")
+private val AUDIENCE_HI = mapOf("all" to "सबको", "gs" to "महासचिव", "dc" to "ज़िला कोऑर्डिनेटरों को", "dp" to "ज़िला अध्यक्षों को", "observer" to "ऑब्ज़र्वर को", "block" to "ब्लॉक अध्यक्षों को", "member" to "वार्ड सदस्यों को")
 
 @Composable
 private fun ReportCard(r: JSONObject, lc: LeaderCtx) {
@@ -837,6 +1069,9 @@ private fun ReportCard(r: JSONObject, lc: LeaderCtx) {
             }
             from?.let { CallButton(Callee(it.optString("mobile"), it.optString("name"), LEVEL_HI[it.optString("role")] ?: ""), lc) }
         }
+        val acts = r.optJSONArray("activities")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
+        if (!r.isNull("ward_no") && r.optInt("ward_no") > 0) Text("वार्ड ${r.optInt("ward_no")} का दौरा", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Blue)
+        if (acts.isNotEmpty()) Text(acts.joinToString(" · "), fontSize = 12.5.sp, color = GreenText, lineHeight = 18.sp)
         r.str("note")?.let { Text(it, fontSize = 14.sp, color = Ink) }
         r.str("audio_url")?.let { AudioPlayer(it) }
         val media = r.optJSONArray("media").list()
@@ -849,8 +1084,6 @@ private fun ReportCard(r: JSONObject, lc: LeaderCtx) {
                 }
             }
         }
-        if (!r.isNull("lat")) Text("लोकेशन ऐप से अपने आप: ${"%.4f".format(r.optDouble("lat"))}, ${"%.4f".format(r.optDouble("lng"))}", fontSize = 11.5.sp, color = Blue,
-            modifier = Modifier.clickable { openLink(ctx, "https://maps.google.com/?q=${r.optDouble("lat")},${r.optDouble("lng")}") })
         HorizontalDivider(color = Color(0xFFF0F2F6))
     }
 }
@@ -867,6 +1100,7 @@ private fun LeaderPage(page: Page, lc: LeaderCtx, onBack: () -> Unit, onLogout: 
         "district" -> "${page.arg} ज़िला"; "assembly" -> page.arg ?: ""; "ward" -> "वार्ड ${page.arg}"; "member" -> "सदस्य"
         "tasks_report" -> "टास्क रिपोर्ट"; "reports" -> "फ़ील्ड रिपोर्ट"; "calls" -> "मेरी कॉल"; "sent" -> "भेजे गए मैसेज"
         "personal" -> "${lc.personal?.first?.name ?: ""} को संदेश"
+        "district_ranks" -> "ज़िलेवार रैंकिंग"; "my_tasks" -> "मेरे टास्क"
         "compose" -> "मैसेज या वॉइस नोट"; "task_create" -> if (page.arg == "suggest") "नया टास्क सुझाएं" else if (lc.role == "president") "टास्क असाइन करें" else "नया टास्क"
         "report_new" -> "नई विज़िट रिपोर्ट"; "president_inbox" -> "लोगों के संदेश"; "profile" -> "मेरी प्रोफ़ाइल"; else -> ""
     }
@@ -885,18 +1119,24 @@ private fun LeaderPage(page: Page, lc: LeaderCtx, onBack: () -> Unit, onLogout: 
                 "compose" -> ComposePage(lc, onBack)
                 "personal" -> lc.personal?.let { (c, preset) -> PersonalPage(c, preset, onBack) }
                 "task_create" -> TaskCreatePage(lc, suggest = page.arg == "suggest", onBack = onBack)
-                "report_new" -> ReportNewPage(page.arg?.toLongOrNull(), onBack)
+                "report_new" -> ReportNewPage(page.arg?.toLongOrNull(), lc, onBack)
                 "president_inbox" -> PresidentInboxPage()
-                "profile" -> {
-                    LCard {
-                        Text(lc.me.optString("name"), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
-                        Text(ROLE_HI[lc.role] ?: lc.role, color = Muted)
-                        lc.me.str("district")?.let { Text("ज़िला: $it") }
-                        lc.me.str("assembly")?.let { Text("विधानसभा: $it") }
-                        Text("लॉगिन नंबर: ${lc.me.optString("mobile")} (बदल नहीं सकते)", color = Muted, fontSize = 13.sp)
+                "my_tasks" -> MyTasksTab(lc)
+                "district_ranks" -> LCard {
+                    Text("ज़िले का नाम और उसकी रैंक।", fontSize = 12.5.sp, color = Muted)
+                    lc.ov.optJSONArray("district_ranks").list().forEach { x ->
+                        val mine = x.optString("name").trim().equals(lc.me.optString("district").trim(), ignoreCase = true)
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (mine) OrangeBg else Color.Transparent).padding(horizontal = 10.dp, vertical = 11.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("${x.optInt("rank")}", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = if (mine) OrangeText else Navy, modifier = Modifier.width(40.dp))
+                            Text(x.optString("name") + if (mine) "  (आपका ज़िला)" else "", fontSize = 15.5.sp, fontWeight = if (mine) FontWeight.Bold else FontWeight.Medium, color = Ink)
+                        }
+                        HorizontalDivider(color = Color(0xFFF0F2F6))
                     }
-                    OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) { Text("लॉगआउट") }
                 }
+                "profile" -> LeaderProfilePage(lc, onLogout)
             }
         }
     }
@@ -928,7 +1168,7 @@ private fun AssemblyPage(name: String, lc: LeaderCtx) {
     val ms = lc.ov.optJSONArray("members").list().filter { it.optString("assembly") == name }
     ms.groupBy { it.optInt("ward_no") }.toSortedMap().forEach { (no, list) ->
         LCard("वार्ड $no", action = { Text("${list.size} सदस्य", fontSize = 12.sp, color = Muted) }) {
-            list.sortedByDescending { it.optInt("points") }.forEach { MemberRow(it, lc) }
+            list.sortedBy { it.optInt("points") }.forEach { MemberRow(it, lc) }
         }
     }
 }
@@ -952,7 +1192,7 @@ private fun MemberPage(mobile: String, lc: LeaderCtx) {
     val m = lc.ov.optJSONArray("members").list().firstOrNull { it.optString("mobile") == mobile } ?: return
     LCard(m.optString("name"), action = { StatusChip(m.optString("status")) }) {
         Text("वार्ड ${m.optInt("ward_no")} · ${m.optString("assembly")} · ${m.optString("district")}", fontSize = 13.sp, color = Muted)
-        Text("${fmtNum(m.optInt("points"))} अंक" + (if (!m.isNull("rating")) " · ऑब्ज़र्वर रेटिंग ${m.optDouble("rating")}" else ""), fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Text("${fmtNum(m.optInt("points"))} अंक", fontSize = 15.sp, fontWeight = FontWeight.Bold)
     }
     Kpis(listOf("${m.optInt("full_tasks")}" to "पूरे टास्क", "${m.optInt("videos")}" to "वीडियो", "${m.optInt("photos")}" to "फोटो", "${m.optInt("shares")}" to "शेयर"))
     Button(onClick = { lc.call(m.memberCallee()) }, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Green)) {
@@ -961,6 +1201,7 @@ private fun MemberPage(mobile: String, lc: LeaderCtx) {
     if (lc.role == "president") OutlinedButton(onClick = { lc.message(m.memberCallee(), "") }, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(12.dp)) {
         Icon(Icons.Filled.Mail, null); Text("  व्यक्तिगत संदेश भेजें")
     }
+    if (lc.role == "observer" && m.optBoolean("is_applicant", true)) FeedbackForm(m, lc)
 }
 
 @Composable
@@ -992,7 +1233,7 @@ private fun TasksReportPage(lc: LeaderCtx) {
         }
     }
     val progress = d.optJSONArray("progress").list()
-    listOf("gs", "dp", "observer").forEach { lv ->
+    LEVEL_ORDER.forEach { lv ->
         val ts = progress.filter { it.optString("level") == lv }
         if (ts.isNotEmpty()) LCard(LEVEL_HI[lv] ?: lv, action = { Text("${ts.size} टास्क", fontSize = 12.sp, color = Muted) }) {
             ts.forEach { t ->
@@ -1001,7 +1242,8 @@ private fun TasksReportPage(lc: LeaderCtx) {
                     Text(t.optString("title"), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                     Bar("पूरा", if (total > 0) done.toFloat() / total else 0f, "$done/$total")
                     if (openId == t.optLong("id")) {
-                        Text("अभी बाकी:", fontSize = 12.sp, color = Muted, modifier = Modifier.padding(top = 4.dp))
+                        val leftAll = if (t.has("left_count")) t.optInt("left_count") else t.optJSONArray("left").list().size
+                        Text(if (leftAll > 50) "अभी $leftAll बाकी हैं। पहले 50 नाम:" else "अभी बाकी:", fontSize = 12.sp, color = Muted, modifier = Modifier.padding(top = 4.dp))
                         t.optJSONArray("left").list().forEach { p ->
                             val c = Callee(p.optString("mobile"), p.optString("name"), LEVEL_HI[lv] ?: "")
                             RowItem(p.optString("name"), p.str("assembly") ?: p.str("district") ?: "") { CallButton(c, lc) }
@@ -1027,22 +1269,23 @@ private fun CallsPage(lc: LeaderCtx) {
         var seed by remember { mutableIntStateOf(0) }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Picker("प्रदर्शन", kind, listOf("good" to "परफ़ॉर्मिंग", "bad" to "नॉन-परफ़ॉर्मिंग"), Modifier.weight(1f)) { kind = it; seed++ }
-            Picker("किससे", who, listOf("observer" to "ऑब्ज़र्वर", "member" to "वार्ड सदस्य"), Modifier.weight(1f)) { who = it; seed++ }
+            Picker("किससे", who, listOf("dp" to "ज़िला अध्यक्ष", "observer" to "ऑब्ज़र्वर", "block" to "ब्लॉक अध्यक्ष", "member" to "वार्ड सदस्य"), Modifier.weight(1f)) { who = it; seed++ }
         }
         val pool: List<JSONObject> = remember(kind, who, seed) {
-            if (who == "observer") {
-                val base = lc.ov.optJSONArray("assemblies").list().filter { it.optJSONObject("observer") != null }
+            if (who == "observer" || who == "dp") {
+                val base = if (who == "dp") lc.ov.optJSONArray("districts").list().filter { it.optJSONObject("dp") != null }
+                else lc.ov.optJSONArray("assemblies").list().filter { it.optJSONObject("observer") != null }
                 val half = (base.size / 2).coerceAtLeast(1)
                 (if (kind == "good") base.take(half) else base.takeLast(half)).shuffled().take(5)
             } else {
-                val all = lc.ov.optJSONArray("members").list()
+                val all = lc.ov.optJSONArray("members").list().filter { if (who == "block") !it.isNull("block_no") else it.optBoolean("is_applicant", true) }
                 if (kind == "good") all.filter { it.optString("status") == "active" && it.optInt("points") > 0 }.sortedByDescending { it.optInt("points") }.take(40).shuffled().take(5)
                 else all.filter { it.optString("status") != "active" }.shuffled().take(5)
             }
         }
         LCard("इनसे बात करें", action = { TextButton(onClick = { seed++ }) { Text("दूसरे 5") } }) {
-            pool.forEach { if (who == "observer") ObserverRow(it, lc) else MemberRow(it, lc) }
-            if (pool.isEmpty()) Text(if (kind == "good") "अभी कोई एक्टिव सदस्य नहीं है।" else "इस सूची में अभी कोई नहीं है।", color = Muted, fontSize = 13.sp)
+            pool.forEach { when (who) { "observer" -> ObserverRow(it, lc); "dp" -> DistrictRow(it, lc); else -> MemberRow(it, lc) } }
+            if (pool.isEmpty()) Text(if (who == "block" && lc.ov.optJSONArray("blocks").list().isEmpty()) "ब्लॉक अध्यक्षों की सूची अभी जुड़ी नहीं है।" else "इस सूची में अभी कोई नहीं है।", color = Muted, fontSize = 13.sp)
         }
     }
     LCard("मेरी कॉल", action = { TextButton(onClick = { key++ }) { Text("रीफ्रेश") } }) {
@@ -1062,8 +1305,8 @@ private fun ComposePage(lc: LeaderCtx, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val audiences = when (lc.role) {
-        "president" -> listOf("all" to "सबको", "gs" to "महासचिव", "dp" to "सभी ज़िला अध्यक्ष", "observer" to "सभी ऑब्ज़र्वर", "member" to "सभी वार्ड सदस्य")
-        "gs" -> listOf("dp" to "सभी ज़िला अध्यक्ष", "observer" to "सभी ऑब्ज़र्वर", "member" to "सभी वार्ड सदस्य")
+        "president" -> listOf("all" to "सबको", "gs" to "महासचिव", "dp" to "सभी ज़िला अध्यक्ष", "observer" to "सभी ऑब्ज़र्वर", "block" to "सभी ब्लॉक अध्यक्ष", "member" to "सभी वार्ड सदस्य")
+        "gs" -> listOf("dc" to "सभी ज़िला कोऑर्डिनेटर", "dp" to "सभी ज़िला अध्यक्ष", "observer" to "सभी ऑब्ज़र्वर", "block" to "सभी ब्लॉक अध्यक्ष", "member" to "सभी वार्ड सदस्य")
         "dp" -> listOf("observer" to "मेरे ज़िले के ऑब्ज़र्वर", "member" to "मेरे ज़िले के वार्ड सदस्य")
         else -> listOf("member" to "मेरी विधानसभा के वार्ड सदस्य")
     }
@@ -1100,8 +1343,8 @@ private fun TaskCreatePage(lc: LeaderCtx, suggest: Boolean, onBack: () -> Unit) 
     val scope = rememberCoroutineScope()
     val levels = when {
         suggest -> listOf((if (lc.role == "dp") "observer" else "observer") to "ऑब्ज़र्वर के लिए")
-        lc.role == "president" -> listOf("gs" to "महासचिव", "dp" to "ज़िला अध्यक्ष")
-        lc.role == "gs" -> listOf("dp" to "ज़िला अध्यक्ष", "observer" to "विधानसभा ऑब्ज़र्वर")
+        lc.role == "president" -> listOf("gs" to "महासचिव", "dp" to "ज़िला अध्यक्ष", "block" to "ब्लॉक अध्यक्ष")
+        lc.role == "gs" -> listOf("dc" to "ज़िला कोऑर्डिनेटर", "dp" to "ज़िला अध्यक्ष", "observer" to "विधानसभा ऑब्ज़र्वर", "block" to "ब्लॉक अध्यक्ष", "member" to "वार्ड सदस्य")
         else -> listOf("observer" to "मेरे ज़िले के ऑब्ज़र्वर")
     }
     var level by remember { mutableStateOf(levels.first().first) }
@@ -1147,47 +1390,50 @@ private fun TaskCreatePage(lc: LeaderCtx, suggest: Boolean, onBack: () -> Unit) 
     ) { Text(if (sending) "भेजा जा रहा है…" else if (suggest) "सुझाव भेजें" else "टास्क भेजें", fontWeight = FontWeight.Bold) }
 }
 
-/** Observer visit report: text, voice note, photos and videos, location picked up by the app. */
+/** Observer visit report: the ward visited, what was done there, then text, voice note, photos and videos. */
 @Composable
-private fun ReportNewPage(taskId: Long?, onBack: () -> Unit) {
+private fun ReportNewPage(taskId: Long?, lc: LeaderCtx, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    var ward by remember { mutableStateOf("") }
+    val acts = remember { mutableStateListOf<String>() }
     var note by remember { mutableStateOf("") }
     var voice by remember { mutableStateOf<File?>(null) }
-    var media by remember { mutableStateOf(listOf<Pair<String, Uri>>()) }
+    val media = remember { mutableStateListOf<Attachment>() }
     var sending by remember { mutableStateOf(false) }
-    var status by remember { mutableStateOf("") }
     val askLocation = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { warmLocation(ctx) }
     LaunchedEffect(Unit) { askLocation.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) }
-    val pickPhotos = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { us -> media = (media + us.map { "photo" to it }).take(8) }
-    val pickVideos = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { us -> media = (media + us.map { "video" to it }).take(8) }
+    val wards = lc.ov.optJSONArray("wards").list().sortedBy { it.optInt("no") }
 
     if (taskId != null) Text("यह रिपोर्ट टास्क के साथ जुड़ेगी और टास्क पूरा माना जाएगा।", fontSize = 13.sp, color = Muted)
-    OutlinedTextField(note, { note = it.take(3000) }, label = { Text("कहाँ गए, क्या देखा, किससे मिले") }, minLines = 5, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+    Picker("आज कौन सा वार्ड विज़िट किया", ward, listOf("" to "वार्ड चुनें") + wards.map { w -> w.optInt("no").toString() to "वार्ड ${w.optInt("no")}${w.str("name")?.let { " · $it" } ?: ""}" }) { ward = it }
+    LCard("वहाँ क्या किया") {
+        VISIT_ACTIVITIES.forEach { a ->
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { if (a in acts) acts.remove(a) else acts.add(a) }, verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = a in acts, onCheckedChange = { if (it) acts.add(a) else acts.remove(a) }, colors = CheckboxDefaults.colors(checkedColor = Navy))
+                Text(a, fontSize = 14.5.sp, color = Ink)
+            }
+        }
+    }
+    OutlinedTextField(note, { note = it.take(3000) }, label = { Text("क्या देखा, किससे मिले") }, minLines = 5, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
     VoiceNote(voice) { voice = it }
+    AttachBox(media, leader = true)
     val guard = rememberSendGuard()
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = { pickPhotos.launch("image/*") }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)) { Icon(Icons.Filled.PhotoCamera, null); Text(" फोटो") }
-        OutlinedButton(onClick = { pickVideos.launch("video/*") }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)) { Icon(Icons.Filled.Videocam, null); Text(" वीडियो") }
-    }
-    if (media.isNotEmpty()) Text("${media.count { it.first == "photo" }} फोटो, ${media.count { it.first == "video" }} वीडियो चुने", fontSize = 13.sp, color = GreenText)
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Filled.LocationOn, null, tint = Muted, modifier = Modifier.size(16.dp))
-        Text(" लोकेशन ऐप अपने आप ले लेता है।", fontSize = 12.5.sp, color = Muted)
-    }
-    if (status.isNotBlank()) Text(status, fontSize = 13.sp, color = Blue)
+    val uploading = media.any { it.path == null && !it.failed }
+    val failed = media.any { it.failed }
+    if (uploading) Text("फोटो या वीडियो अपलोड हो रहे हैं। पूरा होते ही रिपोर्ट भेज सकेंगे।", fontSize = 13.sp, color = Blue)
+    if (failed) Text("कोई फ़ाइल अपलोड नहीं हुई। उसे दोबारा अपलोड करें या हटा दें।", fontSize = 13.sp, color = Color(0xFF9B1C1C))
     Button(
         onClick = { guard {
-            if (note.isBlank() && voice == null && media.isEmpty()) { Toast.makeText(ctx, "कुछ लिखें, बोलें या फोटो डालें", Toast.LENGTH_SHORT).show(); return@guard }
+            if (ward.isBlank() && wards.isNotEmpty()) { Toast.makeText(ctx, "वार्ड चुनें", Toast.LENGTH_SHORT).show(); return@guard }
+            if (acts.isEmpty() && note.isBlank() && voice == null && media.isEmpty()) { Toast.makeText(ctx, "कुछ टिक करें, लिखें, बोलें या फोटो जोड़ें", Toast.LENGTH_SHORT).show(); return@guard }
             sending = true
             scope.launch {
                 try {
                     val arr = JSONArray()
-                    media.forEachIndexed { i, (kind, uri) ->
-                        status = "अपलोड हो रहा है ${i + 1}/${media.size}"
-                        arr.put(JSONObject().put("kind", kind).put("path", uploadUri(ctx, true, uri, kind)))
-                    }
-                    val p = JSONObject().put("note", note.trim()).put("media", arr)
+                    media.forEach { m -> arr.put(JSONObject().put("kind", m.kind).put("path", m.path)) }
+                    val p = JSONObject().put("note", note.trim()).put("media", arr).put("activities", JSONArray(acts.toList()))
+                    ward.toIntOrNull()?.let { p.put("ward_no", it) }
                     voice?.let { p.put("audio_path", uploadFile(ctx, true, it, "audio", "audio/mp4")) }
                     taskId?.let { p.put("task_id", it) }
                     lastLocation(ctx)?.let { p.put("lat", it.latitude).put("lng", it.longitude) }
@@ -1195,11 +1441,11 @@ private fun ReportNewPage(taskId: Long?, onBack: () -> Unit) {
                     Toast.makeText(ctx, "रिपोर्ट भेज दी गई", Toast.LENGTH_LONG).show()
                     onBack()
                 } catch (e: Exception) { Toast.makeText(ctx, "भेजा नहीं जा सका, इंटरनेट चेक करें", Toast.LENGTH_LONG).show() }
-                sending = false; status = ""
+                sending = false
             }
         } },
-        enabled = !sending, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Navy),
-    ) { Text(if (sending) "भेजा जा रहा है…" else "रिपोर्ट भेजें", fontWeight = FontWeight.Bold) }
+        enabled = !sending && !uploading && !failed, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Navy),
+    ) { Text(if (sending) "भेजा जा रहा है…" else if (uploading) "अपलोड पूरा होने दें…" else "रिपोर्ट भेजें", fontWeight = FontWeight.Bold) }
 }
 
 /** Messages ward members and observers sent to the President. */
@@ -1207,10 +1453,36 @@ private fun ReportNewPage(taskId: Long?, onBack: () -> Unit) {
 private fun PresidentInboxPage() {
     val ctx = LocalContext.current
     var list by remember { mutableStateOf<List<JSONObject>?>(null) }
-    LaunchedEffect(Unit) { list = try { Api.leader(ctx, "president_inbox").optJSONArray("messages").list() } catch (e: Exception) { emptyList() } }
-    Text("सदस्यों और ऑब्ज़र्वर ने आपको जो संदेश भेजे। हर संदेश पर उसका टैग लगा है।", fontSize = 12.5.sp, color = Muted)
+    var week by remember { mutableIntStateOf(0) }
+    var weeks by remember { mutableIntStateOf(1) }
+    LaunchedEffect(week) {
+        list = null
+        list = try {
+            val r = Api.leader(ctx, "president_inbox", JSONObject().put("week", week))
+            weeks = r.optInt("weeks", 1).coerceIn(1, 26)
+            r.optJSONArray("messages").list()
+        } catch (e: Exception) { emptyList() }
+    }
+    // Seven days at a time: this week, last week, then earlier weeks by their dates.
+    fun label(w: Int): String = when (w) {
+        0 -> "इस हफ़्ते"; 1 -> "पिछला हफ़्ता"
+        else -> {
+            val end = java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_YEAR, -7 * w) }
+            val start = java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_YEAR, -7 * (w + 1) + 1) }
+            "${start.get(java.util.Calendar.DAY_OF_MONTH)} ${HI_MONTHS[start.get(java.util.Calendar.MONTH)]} से ${end.get(java.util.Calendar.DAY_OF_MONTH)} ${HI_MONTHS[end.get(java.util.Calendar.MONTH)]}"
+        }
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+        (0 until maxOf(weeks, 2)).forEach { w ->
+            Text(label(w), fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = if (week == w) Color.White else Navy,
+                modifier = Modifier.clip(RoundedCornerShape(50)).background(if (week == w) Navy else Color.White).border(1.dp, if (week == w) Navy else Line, RoundedCornerShape(50))
+                    .clickable { week = w }.padding(horizontal = 14.dp, vertical = 9.dp))
+        }
+    }
+    Text("सदस्यों और ऑब्ज़र्वर ने आपको जो संदेश भेजे, सात सात दिन के हिसाब से। हर संदेश पर उसका टैग लगा है।", fontSize = 12.5.sp, color = Muted, lineHeight = 18.sp)
     val l = list ?: run { CircularProgressIndicator(color = Orange); return }
-    if (l.isEmpty()) Text("अभी कोई संदेश नहीं", color = Muted)
+    Text("${label(week)}: ${l.size} संदेश", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Ink)
+    if (l.isEmpty()) Text("इन सात दिनों में कोई संदेश नहीं आया।", color = Muted)
     l.forEach { m ->
         LCard {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1280,4 +1552,83 @@ private fun PersonalPage(c: Callee, preset: String, onBack: () -> Unit) {
         } },
         enabled = !sending, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Navy),
     ) { Icon(Icons.AutoMirrored.Filled.Send, null); Text(if (sending) "  भेजा जा रहा है…" else "  भेजें", fontWeight = FontWeight.Bold) }
+}
+
+/** A leader's own profile: photo, name and, for everyone but the President, post, birthday and marriage details. */
+@Composable
+private fun LeaderProfilePage(lc: LeaderCtx, onLogout: () -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val president = lc.role == "president"
+    var loaded by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf<String?>(null) }
+    var photoUrl by remember { mutableStateOf<String?>(null) }
+    var photoFile by remember { mutableStateOf<File?>(null) }
+    var name by remember { mutableStateOf(lc.me.optString("name")) }
+    var position by remember { mutableStateOf("") }
+    var dob by remember { mutableStateOf("") }
+    var gender by remember { mutableStateOf("") }
+    var married by remember { mutableStateOf("") }
+    var anniversary by remember { mutableStateOf("") }
+    var saving by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        try {
+            val r = Api.leader(ctx, "profile")
+            val latest = r.optJSONObject("latest")
+            // A change still waiting for approval is shown as the person left it; otherwise the saved profile.
+            val src = if (latest?.optString("status") == "pending") latest else r.optJSONObject("leader") ?: lc.me
+            status = latest?.optString("status")
+            photoUrl = r.str("photo_url")
+            name = src.str("name") ?: name; position = src.str("position") ?: ""
+            dob = src.str("dob") ?: ""; gender = src.str("gender") ?: ""
+            married = if (src.isNull("married")) "" else if (src.optBoolean("married")) "yes" else "no"
+            anniversary = src.str("anniversary") ?: ""
+        } catch (_: Exception) {}
+        loaded = true
+    }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> if (uri != null) squarePhoto(ctx, uri)?.let { photoFile = it } }
+    LCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ProfilePhoto(photoFile ?: photoUrl, 84) { pick.launch("image/*") }
+            Column(Modifier.padding(start = 14.dp)) {
+                Text(lc.me.optString("name"), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
+                Text(ROLE_HI[lc.role] ?: lc.role, color = Muted, fontSize = 13.5.sp)
+                lc.me.str("assembly")?.let { Text("विधानसभा: $it", fontSize = 13.sp, color = Muted) } ?: lc.me.str("district")?.let { Text("संगठनात्मक ज़िला: $it", fontSize = 13.sp, color = Muted) }
+                TextButton(onClick = { pick.launch("image/*") }, contentPadding = PaddingValues(0.dp)) { Icon(Icons.Filled.PhotoCamera, null, modifier = Modifier.size(16.dp)); Text(" फोटो बदलें") }
+            }
+        }
+    }
+    if (!president && status == "pending") Text("आपका पिछला बदलाव मंज़ूरी के लिए गया हुआ है। मंज़ूर होते ही दिखने लगेगा।", fontSize = 13.sp, color = OrangeText, lineHeight = 19.sp)
+    if (!president && status == "rejected") Text("पिछला बदलाव मंज़ूर नहीं हुआ। ठीक करके फिर भेज सकते हैं।", fontSize = 13.sp, color = Color(0xFF9B1C1C), lineHeight = 19.sp)
+    OutlinedTextField(name, { name = it.take(80) }, label = { Text("पूरा नाम") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+    if (!president) {
+        OutlinedTextField(position, { position = it.take(120) }, label = { Text("पार्टी में पद") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+        DateField("जन्म तिथि", dob) { dob = it }
+        ChoiceRow("लिंग", listOf("male" to "पुरुष", "female" to "महिला", "other" to "अन्य"), gender) { gender = it }
+        ChoiceRow("वैवाहिक स्थिति", listOf("yes" to "विवाहित", "no" to "अविवाहित"), married) { married = it }
+        if (married == "yes") DateField("शादी की सालगिरह", anniversary) { anniversary = it }
+    }
+    Button(
+        onClick = {
+            if (name.isBlank()) { Toast.makeText(ctx, "नाम लिखें", Toast.LENGTH_SHORT).show(); return@Button }
+            saving = true
+            scope.launch {
+                try {
+                    val p = JSONObject().put("name", name.trim())
+                    if (!president) {
+                        p.put("position", position.trim()).put("dob", dob).put("gender", gender)
+                        if (married.isNotBlank()) p.put("married", married == "yes")
+                        if (married == "yes") p.put("anniversary", anniversary)
+                    }
+                    photoFile?.let { p.put("photo_path", uploadFile(ctx, true, it, "photo", "image/jpeg")) }
+                    val r = Api.leader(ctx, "profile_save", p)
+                    if (r.optBoolean("applied")) { Toast.makeText(ctx, "प्रोफ़ाइल बदल दी गई", Toast.LENGTH_LONG).show(); lc.reload() }
+                    else { status = "pending"; Toast.makeText(ctx, "बदलाव मंज़ूरी के लिए भेज दिया गया", Toast.LENGTH_LONG).show() }
+                } catch (e: Exception) { Toast.makeText(ctx, "सेव नहीं हुआ, इंटरनेट चेक करें", Toast.LENGTH_LONG).show() }
+                saving = false
+            }
+        },
+        enabled = loaded && !saving, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Navy),
+    ) { Text(if (saving) "सेव हो रहा है…" else if (president) "सेव करें" else "मंज़ूरी के लिए भेजें", fontWeight = FontWeight.Bold) }
+    OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) { Text("लॉगआउट") }
 }

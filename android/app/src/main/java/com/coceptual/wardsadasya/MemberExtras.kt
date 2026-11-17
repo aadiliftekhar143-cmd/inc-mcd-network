@@ -108,7 +108,7 @@ private fun shareToWhatsApp(ctx: Context, text: String) {
 
 // ---------------------------------------------------------------- Inbox (one way)
 
-internal val INBOX_KIND = mapOf("kudos" to "बधाई संदेश", "motivate" to "प्रेरणा संदेश", "personal" to "व्यक्तिगत संदेश", "broadcast" to "संदेश")
+internal val INBOX_KIND = mapOf("kudos" to "बधाई संदेश", "motivate" to "प्रेरणा संदेश", "personal" to "व्यक्तिगत संदेश", "broadcast" to "संदेश", "notice" to "सूचना")
 
 @Composable
 internal fun InboxScreen(onBack: () -> Unit, leader: Boolean = false) {
@@ -132,7 +132,7 @@ internal fun InboxScreen(onBack: () -> Unit, leader: Boolean = false) {
                 }
                 else -> l.forEach { m ->
                     val kind = m.optString("kind")
-                    val personal = kind != "broadcast"
+                    val personal = kind != "broadcast" && kind != "notice"
                     Column(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color.White)
                             .border(if (personal) 1.5.dp else 1.dp, if (personal) Color(0xFFF6C9A0) else Line, RoundedCornerShape(16.dp)).padding(14.dp),
@@ -284,8 +284,17 @@ internal fun ToPresidentScreen(leader: Boolean, onBack: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 LeaderThumb(60, 0)
-                Text("अगर आपको कोई चिंता है या आप माननीय DPCC अध्यक्ष देवेन्द्र यादव जी को निजी तौर पर कोई संदेश देना चाहते हैं, तो इस सुविधा का प्रयोग करें।",
-                    color = Color.White, fontSize = 14.sp, lineHeight = 21.sp, modifier = Modifier.padding(start = 14.dp))
+                Column(Modifier.padding(start = 14.dp)) {
+                    Row(
+                        Modifier.clip(RoundedCornerShape(8.dp)).background(Orange).padding(horizontal = 10.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.Lock, null, tint = Color.White, modifier = Modifier.size(14.dp))
+                        Text(" गोपनीय", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Text("अगर आपको कोई चिंता है या आप माननीय DPCC अध्यक्ष देवेन्द्र यादव जी को निजी तौर पर कोई संदेश देना चाहते हैं, तो इस सुविधा का प्रयोग करें।",
+                        color = Color.White, fontSize = 14.sp, lineHeight = 21.sp, modifier = Modifier.padding(top = 8.dp))
+                }
             }
             OutlinedTextField(text, { text = it.take(2000) }, label = { Text("अपना संदेश लिखें") }, minLines = 5, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
             VoiceNote(voice) { voice = it }
