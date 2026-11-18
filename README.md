@@ -1,158 +1,191 @@
 # INC MCD NETWORK (दिल्ली प्रदेश कांग्रेस कमेटी)
 
-[![Latest Release](https://img.shields.io/badge/version-v2.0%20(Build%2011)-blue.svg)](https://github.com/amandangi26/ward-sadasya/releases/latest)
+[![Latest Release](https://img.shields.io/badge/version-v2.3%20(Build%2014)-blue.svg)](https://github.com/amandangi26/ward-sadasya/releases/latest)
+[![Package Name](https://img.shields.io/badge/package-com.coceptual.delhicongress-1B4FA8.svg)]()
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20Web%20Admin-green.svg)]()
+[![Google Play](https://img.shields.io/badge/Play%20Store-Ready%20(.AAB)-34A853.svg)](https://github.com/amandangi26/ward-sadasya/releases/latest)
 [![Backend](https://img.shields.io/badge/backend-Supabase%20Edge%20Functions-3ECF8E.svg)]()
-[![Portal](https://img.shields.io/badge/domain-congressdelhinetwork.com-1B4FA8.svg)](https://congressdelhinetwork.com/mcd)
+[![Portal](https://img.shields.io/badge/portal-congressdelhinetwork.com-1B4FA8.svg)](https://congressdelhinetwork.com/mcd)
 
-**INC MCD NETWORK** दिल्ली प्रदेश कांग्रेस कमेटी (DPCC) की आधिकारिक डिजिटल प्रबंधन प्रणाली है, जो दिल्ली के सभी **250 MCD वार्डों**, 70 विधानसभाओं और 14 ज़िलों के संगठन को एकजुट और सक्रिय रखती है।
+**INC MCD NETWORK** दिल्ली प्रदेश कांग्रेस कमेटी (DPCC) की आधिकारिक डिजिटल प्रबंधन और संगठनात्मक समन्वय प्रणाली है। यह दिल्ली के सभी **250 MCD वार्डों**, 70 विधानसभाओं और 14 संगठनात्मक ज़िलों के शीर्ष नेतृत्व से लेकर बूथ व वार्ड स्तर के कार्यकर्ताओं को एकजुट, सक्रिय और जवाबदेह रखती है।
+
+---
+
+## 📌 महत्वपूर्ण त्वरित लिंक्स (Important Links)
+
+| सेवा / पृष्ठ | लाइव यूआरएल | विवरण |
+| :--- | :--- | :--- |
+| **एडमिन एवं टेलीकॉलर पोर्टल** | [congressdelhinetwork.com/mcd](https://congressdelhinetwork.com/mcd) | संगठन प्रबंधन, टास्क निर्माण, कॉलिंग और एनालिटिक्स |
+| **वैकल्पिक एडमिन पोर्टल** | [ward-sadasya.vercel.app/mcd](https://ward-sadasya.vercel.app/mcd) | Vercel बैकअप लाइव पोर्टल |
+| **ऐप डाउनलोड (APK & AAB)** | [congressdelhinetwork.com/download](https://congressdelhinetwork.com/download) | कार्यकर्ताओं के लिए सीधा डाउनलोड पेज |
+| **गोपनीयता नीति (Privacy Policy)** | [congressdelhinetwork.com/privacy](https://congressdelhinetwork.com/privacy) | DPDP Act 2023 व Google Play अनुरूप नीति |
+| **खाता हटाने का अनुरोध (Delete Account)** | [congressdelhinetwork.com/delete-account](https://congressdelhinetwork.com/delete-account) | Google Play Store अनिवार्य डेटा डिलीशन पेज |
+| **नवीनतम रिलीज़ (GitHub Releases)** | [GitHub Releases Latest](https://github.com/amandangi26/ward-sadasya/releases/latest) | `.aab` (Play Store) व `.apk` फ़ाइलें |
 
 ---
 
 ## 🏛️ प्रोजेक्ट आर्किटेक्चर (System Architecture)
 
-प्रोजेक्ट तीन मुख्य घटकों से मिलकर बना है:
+प्रोजेक्ट तीन मुख्य घटकों में विभाजित है:
 
-| फोल्डर | घटक | तकनीक | होस्टिंग / डिप्लॉयमेंट |
-| :--- | :--- | :--- | :--- |
-| **`android/`** | **Android App (APK)** | Native Kotlin, Jetpack Compose Material 3, OkHttp, Coil, WorkManager, FCM | GitHub Actions / Permanent Keystore Release (`v1.8`) |
-| **`admin/`** | **Admin & Calling Portal** | React 18, Vite, Lucide Icons, SheetJS (XLSX) | Vercel (`congressdelhinetwork.com/mcd`) |
-| **`supabase/`** | **Database & API** | PostgreSQL 17 (RLS), Supabase Storage, Deno Edge Functions | Supabase Cloud (`ap-south-1` Mumbai) |
+```
+ward-sadasya/
+├── android/               # Native Android App (Kotlin + Jetpack Compose)
+│   ├── app/src/main/java/com/coceptual/delhicongress/
+│   │   ├── MainActivity.kt   # यूज़र इंटरफेस, नेविगेशन व सभी स्क्रीन
+│   │   ├── Leader.kt         # नेतृत्व स्तरों के डैशबोर्ड व रिपोर्ट्स
+│   │   ├── Api.kt            # सिक्योर API क्लाइंट व सेशन मैनेजमेंट
+│   │   ├── Media.kt          # मल्टी-फ़ोटो, वीडियो व ऑडियो रिकॉर्डर
+│   │   ├── Push.kt           # Firebase Cloud Messaging (FCM)
+│   │   └── ReminderWorker.kt # बैकग्राउंड टास्क रिमाइंडर्स
+│   └── app/build.gradle.kts  # Package: com.coceptual.delhicongress
+├── admin/                 # एडमिन एवं टेलीकॉलर वेब पोर्टल (React 18 + Vite)
+│   ├── src/                  # एनालिटिक्स, टास्क, मेंबर्स, कॉलिंग, रिपोर्ट्स
+│   └── public/               # download.html, privacy.html, delete-account.html
+├── supabase/              # बैकएंड एवं डेटाबेस
+│   ├── schema.sql            # 34 टेबल्स, RLS नीतियां, व्यूज व ट्रिगर्स
+│   ├── migration_v2_1_v2_2.sql # v2.1/v2.2 डेटाबेस माइग्रेशन
+│   ├── migration_v2_3.sql    # v2.3 डेटाबेस माइग्रेशन
+│   └── functions/            # Deno Edge Functions (app, leader, admin, push)
+└── docs/
+    └── play-store.md         # Play Console सबमिशन हैंडबुक व डेटा सेफ्टी उत्तर
+```
 
 ---
 
-## 🌟 मुख्य विशेषताएँ (Key Features in v1.8)
+## 📱 Google Play Store हैंडओवर विवरण (Developer Technical Specs)
 
-### 1. एक ही ऐप में 5 नेतृत्व स्तर (5 Leadership Levels in One APK)
-लॉगिन नंबर के आधार पर ऐप ऑटोमैटिकली यूज़र की भूमिका पहचानता है:
+Google Play Console पर ऐप सबमिट करने के लिए आवश्यक सभी तकनीकी विवरण:
+
+| पैरामीटर | मान (Value) | विवरण |
+| :--- | :--- | :--- |
+| **App Name** | `INC MCD NETWORK` | आधिकारिक नाम (अधिकतम 30 अक्षर) |
+| **Package Name / Application ID** | `com.coceptual.delhicongress` | प्ले स्टोर की विशिष्ट पहचान आईडी |
+| **Version Name** | `2.3` | यूज़र को दिखने वाला वर्शन |
+| **Version Code** | `14` | इंटरनल बिल्ड नंबर |
+| **Target SDK** | `34` (Android 14) | Google Play का नवीनतम अनिवार्य मानक |
+| **Minimum SDK** | `24` (Android 7.0) | 98%+ सक्रिय Android डिवाइसेस पर संगत |
+| **Production Bundle** | `app-release.aab` | Play Store पर अपलोड होने वाला Android App Bundle |
+| **Keystore Alias** | `wardsadasya` | रिलीज़ कीस्टोर का एलियास नाम |
+| **Keystore File** | `android/app/release.keystore` | RSA 2048-bit स्थायी रिलीज़ कीस्टोर |
+| **परमिशन्स (v2.3)** | `INTERNET`, `POST_NOTIFICATIONS`, `RECORD_AUDIO` | *नोट: लोकेशन परमिशन पूरी तरह हटा दी गई है* |
+| **App Access (Demo Login)** | Restricted (No OTP) | टेस्ट नंबर दर्ज करके "आगे बढ़ें" पर 1-टैप लॉगिन |
+
+---
+
+## 🌟 प्रमुख विशेषताएँ (Key Features in v2.3)
+
+### 1. एक ही ऐप में 6 संगठनात्मक स्तर (6 Leadership Levels)
+लॉगिन मोबाइल नंबर के आधार पर ऐप स्वतः कार्यकर्ता/पदाधिकारी की भूमिका पहचानता है:
+
 1. **माननीय DPCC अध्यक्ष (President):**
-   * संपूर्ण दिल्ली और ज़िला स्तरीय लाइव एनालिटिक्स एवं परफॉरमेंस रैंकिंग (Top & Bottom 5 ज़िले/वार्ड)।
-   * महासचिवों (GS) एवं ज़िला अध्यक्षों को वॉयस नोट के साथ सीधे टास्क असाइन करना।
-   * प्रेक्षकों की ग्राउंड विज़िट फील्ड रिपोर्ट्स और कार्यकर्ताओं के सीधे संदेशों की समीक्षा।
-   * "मेरी कॉल" — बेहतरीन व कमज़ोर प्रदर्शन करने वाले प्रेक्षकों/कार्यकर्ताओं से 1-टैप कॉलिंग।
+   * संपूर्ण दिल्ली, ज़िला व ब्लॉक स्तरीय लाइव एनालिटिक्स और परफॉरमेंस रैंकिंग।
+   * सभी स्तरों को वॉयस नोट के साथ टास्क असाइन करना और 7-दिन के बंडल्स में संदेश समीक्षा।
 2. **महासचिव (General Secretary):**
-   * 10 स्मार्ट कॉलिंग सुझाव, ज़िला मॉनिटरिंग और नए टास्क निर्माण (अध्यक्ष जी के अनुमोदन पर सक्रिय)।
-3. **ज़िला अध्यक्ष (District President):**
-   * ज़िला रैंक और लाइव स्कोर, अध्यक्ष जी से प्राप्त टास्क, ऑब्जर्वर ट्रैकिंग और ज़िला-स्तरीय ब्रॉडकास्ट।
-4. **विधानसभा प्रेक्षक (Assembly Observer):**
-   * फील्ड विज़िट रिपोर्टिंग (फ़ोटो, वीडियो, ऑडियो वॉयस नोट एवं GPS लोकेशन)।
-   * कार्यकर्ताओं की 3-पॉइंट स्टार रेटिंग्स (ग्राउंड, कनेक्ट, बूथ)।
-   * अध्यक्ष जी को सीधा संदेश भेजने की सुविधा।
-5. **वार्ड कार्यकर्ता (Ward Member):**
-   * दैनिक टास्क पूर्ण करना (न्यूनतम 2 फ़ोटो + 2 वीडियो)।
-   * 1-क्लिक सोशल मीडिया शेयरिंग (WhatsApp, Facebook, X, Instagram)।
-   * **पोस्टर एवं बैनर:** पार्टी पोस्टर्स डाउनलोड कर स्थानीय प्रिंटर से प्रिंट कराने की सुविधा।
-   * **व्यक्तिगत इनबॉक्स:** नेतृत्व की ओर से सीधे व्यक्तिगत संदेश व ऑडियो।
-   * **खुद के टास्क (Own Tasks):** स्वयं किए गए संगठन कार्य को अपलोड कर अंक पाना।
-   * **अध्यक्ष जी को सीधा संदेश:** फ़ोटो और वीडियो अटैचमेंट्स के साथ सीधे DPCC अध्यक्ष तक बात पहुँचाना।
+   * ज़िला समन्वयकों (DC) की दैनिक कॉलिंग रिपोर्ट मॉनिटरिंग और 5 स्तरों पर टास्क वितरण।
+3. **ज़िला समन्वयक (District Coordinator - DC):**
+   * संगठनात्मक ज़िलों में दैनिक कॉलिंग, ब्लॉक अध्यक्षों से संपर्क और महासचिव को दैनिक रिपोर्ट।
+4. **ज़िला अध्यक्ष (District President - DP):**
+   * ज़िला रैंक, लाइव स्कोर, ज़िला ब्रॉडकास्ट और प्रेक्षक ट्रैकिंग।
+5. **विधानसभा प्रेक्षक (Assembly Observer):**
+   * ग्राउंड विज़िट रिपोर्टिंग (गतिविधियों की चेकलिस्ट, फ़ोटो, वीडियो व ऑडियो)।
+   * वार्ड कार्यकर्ताओं का मासिक मूल्यांकन व फ़ीडबैक रिपोर्ट।
+6. **ब्लॉक अध्यक्ष एवं वार्ड कार्यकर्ता (Block President & Ward Member):**
+   * दैनिक कार्य (फ़ोटो/वीडियो अपलोड, सोशल शेयर, चेकलिस्ट व लिखित उत्तर)।
+   * नेतृत्व से सीधे टास्क व इनबॉक्स संदेश प्राप्त करना।
+   * अपने स्वयं के किए गए कार्यों (Own Tasks) को सबमिट कर अंक पाना।
 
----
+### 2. मल्टी-प्रोफ़ाइल सपोर्ट (Multi-Profile Switching)
+* यदि कोई कार्यकर्ता एक से अधिक पदों पर है (उदा. वार्ड कार्यकर्ता + ब्लॉक अध्यक्ष या पदाधिकारी), तो वह ऐप मेन्यू में ऊपर दिए गए स्विचर से **बिना लॉगआउट किए 1-टैप में प्रोफ़ाइल बदल सकता है**।
 
-### 2. 100-अंक योजना (Fixed 100-Points Scheme)
-v1.8 में अंक प्रणाली को पारदर्शी और सरल 100-पॉइंट्स पर निर्धारित किया गया है:
+### 3. नए प्रकार के टास्क (Unified Task Funnel)
+v2.3 में केवल मीडिया अपलोड ही नहीं, बल्कि विविध प्रकार के टास्क उपलब्ध हैं:
+* **Upload Tasks:** ग्राउंड कार्य की न्यूनतम 2 फ़ोटो + 2 वीडियो अपलोड।
+* **Share Tasks:** सोशल मीडिया (WhatsApp, Facebook, X, Instagram) पर 1-क्लिक शेयरिंग।
+* **Checklist Tasks (Choice):** दिए गए विकल्पों में से टिक करके रिपोर्ट सबमिट करना।
+* **Text / Voice Reply:** संक्षिप्त लिखित उत्तर या वॉयस नोट रिकॉर्ड करके भेजना।
+* नेतृत्व (अध्यक्ष जी आदि) द्वारा दिए गए टास्क अब अलग जाने के बजाय मुख्य होम स्क्रीन पर एकीकृत दिखते हैं।
+
+### 4. पारदर्शी 100-अंक योजना (100-Points Scheme)
 * **सोशल शेयर:** प्रति टास्क और प्रति सोशल प्लेटफ़ॉर्म = **100 अंक**
-* **पूर्ण टास्क:** 2 फ़ोटो और 2 वीडियो के साथ टास्क पूरा करने पर = **100 अंक**
+* **पूर्ण टास्क:** टास्क सफलतापूर्वक पूरा करने पर (अपलोड/चेकलिस्ट/टेक्स्ट) = **100 अंक**
 * **खुद का टास्क:** कार्यकर्ता द्वारा स्वयं किए गए कार्य का एडमिन अप्रूवल = **100 अंक**
-*(केवल टास्क चेकबॉक्स टिक करने के शून्य अंक हैं; अंक अपलोड और शेयर से ही मिलते हैं।)*
 
 ---
 
-### 3. एडमिन एवं टेलीकॉलर पोर्टल (`/mcd`)
-* **लाइव यूआरएल:** `https://congressdelhinetwork.com/mcd` (रूट `/` स्वतः `/mcd` पर रीडायरेक्ट होता है)।
-* **आधुनिक लॉगिन:** डार्क नेवी तिरंगा थीम, इनपुट आइकॉन्स, पासवर्ड आई-टॉगल एवं 256-bit SSL एन्क्रिप्शन।
-* **प्रमुख मॉड्यूल्स:**
-  * **Analytics Dashboard:** 250 वार्डों का हीटमैप, दैनिक टास्क ग्राफ, घंटेवार अपलोड्स और टॉप परफॉर्मर्स।
-  * **Calling Panel:** ज़िलावार टेलीकॉलर्स के लिए समर्पित इंटरफ़ेस — 1-टैप कॉल/व्हाट्सएप, फॉलो-अप व आउटकम लॉगिंग।
-  * **Leaders Management:** अध्यक्ष, महासचिव, ज़िला अध्यक्ष और प्रेक्षकों की सूची, भूमिका व ज़िले तय करना।
-  * **Member Tasks:** कार्यकर्ताओं द्वारा स्वयं किए गए कार्यों की समीक्षा और 1-क्लिक अप्रूवल।
-  * **Messages to President:** कार्यकर्ताओं/प्रेक्षकों द्वारा अध्यक्ष जी को भेजे गए संदेश और अटैचमेंट्स।
-  * **Posters:** कार्यकर्ताओं के लिए हाई-रिज़ॉल्यूशन पार्टी बैनर और पोस्टर अपलोड करना।
-  * **Reports:** सभी वार्ड कार्यकर्ताओं की टास्क, मीडिया, शेयर और कॉलिंग रिपोर्ट + Excel डाउनलोड।
-  * **Profile Updates:** कार्यकर्ताओं के प्रोफ़ाइल अपडेट (जन्मतिथि, वैवाहिक वर्षगांठ, सोशल मीडिया लिंक्स) का अप्रूवल।
-  * **Settings:** ऐप वर्शन कंट्रोल, DPCC आधिकारिक सोशल लिंक्स, हेल्पलाइन और रिमाइंडर्स।
+## 💻 एडमिन एवं टेलीकॉलर पोर्टल (`/mcd`)
+
+* **डैशबोर्ड व हीटमैप:** दिल्ली के सभी 250 वार्डों की लाइव स्थिति (रंग-कोडित हीटमैप), दैनिक ट्रेंड्स व टॉप परफॉर्मर्स।
+* **टास्क मैनेजर:** नए टास्क बनाना, लक्षित ऑडियंस (सभी, केवल वार्ड सदस्य, केवल ब्लॉक अध्यक्ष) और ज़िला/विधानसभा फ़िल्टर।
+* **टेलीकॉलर कॉलिंग पैनल:** ज़िलावार कार्यकर्ताओं को 1-क्लिक कॉल, कॉल परिणाम दर्ज करना और फॉलो-अप रिमाइंडर।
+* **डेटा विसंगति समाधान (Data Discrepancies):** छूटे हुए नंबर, डुप्लीकेट और मिसिंग वार्ड्स को सीधे सही करना।
+* **खाता हटाने का प्रबंधन (Deletions):** प्ले स्टोर नीतियों के तहत आए खाता डिलीशन अनुरोधों को 1-क्लिक में प्रोसेस करना (फ़ाइलों, मीडिया व डेटा का स्थायी निष्कासन)।
+* **लीडर व कार्यकर्ता प्रोफ़ाइल अप्रूवल:** कार्यकर्ताओं और पदाधिकारियों द्वारा भेजे गए प्रोफ़ाइल बदलावों की समीक्षा।
 
 ---
 
-## 🚀 इंस्टॉलेशन एवं सेटअप गाइड (Setup Guide)
+## 🛠️ स्थानीय विकास एवं डिप्लॉयमेंट (Setup Guide)
 
-### 1. Supabase बैकएंड सेटअप
-1. Supabase पर प्रोजेक्ट बनाएँ (Region: **Mumbai `ap-south-1`**)।
-2. **SQL Editor** में `supabase/schema.sql` का पूरा कोड रन करें।
-3. **Storage Buckets:** `uploads` (प्राइवेट), `leader` (पब्लिक) और `posters` (पब्लिक) बकेट्स स्वतः बन जाएँगे।
-4. **Edge Functions डिप्लॉय करें:**
+### 1. Supabase बैकएंड
+1. Supabase CLI से जुड़े:
    ```bash
-   supabase functions deploy app --no-verify-jwt
-   supabase functions deploy leader --no-verify-jwt
-   supabase functions deploy push
-   supabase functions deploy admin
+   supabase link --project-ref xqbjqfjystiakfuwplby
    ```
-5. **मास्टर एडमिन यूजर जोड़ें:**
-   Supabase Authentication > Users में ईमेल/पासवर्ड से यूजर जोड़ें और उसका UUID कॉपी करके SQL में रन करें:
-   ```sql
-   insert into admins (user_id, label) values ('PASTE-USER-ID', 'Master Admin');
+2. माइग्रेशन रन करें:
+   ```bash
+   supabase db query --remote --yes -f supabase/migration_v2_3.sql
+   ```
+3. Edge Functions डिप्लॉय करें:
+   ```bash
+   supabase functions deploy app --no-verify-jwt --yes
+   supabase functions deploy leader --no-verify-jwt --yes
+   supabase functions deploy admin --no-verify-jwt --yes
+   supabase functions deploy push --no-verify-jwt --yes
    ```
 
-### 2. एडमिन पोर्टल डिप्लॉयमेंट (Vercel)
-1. Vercel पर रिपॉजिटरी इम्पोर्ट करें।
-2. **Root Directory:** `admin` सेट करें (Framework: Vite).
-3. **Environment Variables** जोड़ें:
-   * `VITE_SUPABASE_URL` = your-supabase-url
-   * `VITE_SUPABASE_ANON_KEY` = your-supabase-anon-key
-4. **कस्टम डोमेन (`congressdelhinetwork.com`):**
-   * Vercel Settings > Domains में `congressdelhinetwork.com` जोड़ें।
-   * DNS में `A` रिकॉर्ड (`@` $\rightarrow$ `76.76.21.21`) और `CNAME` (`www` $\rightarrow$ `cname.vercel-dns.com`) जोड़ें।
-   * `vercel.json` रूट `/` को स्वतः `/mcd` पर रीडायरेक्ट करता है और `/download` को APK डाउनलोड पेज पर मैप करता है।
+### 2. Admin पोर्टल बिल्ड व टेस्ट
+```bash
+cd admin
+npm install
+npm run build
+```
 
-### 3. Android APK बिल्ड (CI/CD व लोकल)
-* **ऑटोमैटिक बिल्ड (GitHub Actions):**
-  * `main` ब्रांच में कोई भी बदलाव पुश होते ही `.github/workflows/android-apk.yml` स्वतः ट्रिगर होता है।
-  * यह रिलीज़ APK को स्थायी `release.keystore` से साइन करके GitHub Releases पर पब्लिश कर देता है।
-* **लोकल बिल्ड:**
+### 3. Android बिल्ड (APK व AAB)
+* **GitHub Actions:** `main` ब्रांच पर पुश होते ही `.github/workflows/android-apk.yml` स्वतः `.apk` और `.aab` दोनों बिल्ड करके रिलीज़ पर पब्लिश कर देता है।
+* **लोकल टर्मिनल बिल्ड:**
   ```bash
   cd android
-  ./gradlew assembleRelease
+  ./gradlew assembleRelease bundleRelease
   ```
-  आउटपुट: `android/app/build/outputs/apk/release/app-release.apk`
+  - **APK आउटपुट:** `android/app/build/outputs/apk/release/app-release.apk`
+  - **AAB आउटपुट:** `android/app/build/outputs/bundle/release/app-release.aab`
 
 ---
 
-## 📱 ऐप डाउनलोड एवं अपडेट
-* **कार्यकर्ता डाउनलोड पेज:** `https://congressdelhinetwork.com/download`
-* **नवीनतम रिलीज़ डायरेक्ट लिंक:** [GitHub Latest Release](https://github.com/amandangi26/ward-sadasya/releases/latest)
-* **स्थायी साइनिंग की (Permanent Keystore):** सभी वर्शन्स एक ही स्थायी RSA 2048 की से साइन होते हैं, जिससे यूज़र्स को कभी पुराना ऐप हटाने (uninstall) की आवश्यकता नहीं होती।
+## 📜 वर्शन इतिहास (Changelog)
+
+* **v2.3 (Build 14) - नवीनतम:**
+  * चेकलिस्ट (Choice) और लिखित उत्तर (Text/Audio) वाले नए टास्क प्रकार।
+  * एकीकृत टास्क फ़नल (Unified Funnel — नेतृत्व के टास्क सीधे होम स्क्रीन पर)।
+  * लोकेशन परमिशन पूरी तरह हटाई गई (Google Play Store की त्वरित मंज़ूरी के लिए)।
+  * लीडर टास्क समापन पर रिमार्क और वॉयस नोट अटैचमेंट।
+  * नया DPDP Act 2023 अनुरूप प्राइवेसी पॉलिसी व डेटा डिलीशन फ़्लो।
+* **v2.2 (Build 13):**
+  * पैकेज नाम बदलकर `com.coceptual.delhicongress` किया गया।
+  * Google Play Store AAB बंडल बिल्ड पाइपलाइन।
+  * ऑब्ज़र्वर फ़ीडबैक हेडिंग और मेन्यू सुधार।
+* **v2.1 (Build 12):**
+  * ब्लॉक अध्यक्ष (Block Presidents) और ज़िला समन्वयक (District Coordinators) स्तर।
+  * मल्टी-प्रोफ़ाइल स्विचिंग सिस्टम।
+  * स्टेप-बाई-स्टेप सोशल मीडिया शेयर।
+  * ऑब्ज़र्वर मासिक फ़ीडबैक रिपोर्ट और ज़िला समन्वयक कॉलिंग रिपोर्ट।
+* **v2.0 (Build 11):**
+  * मास्टर वार्ड संरचना (Lok Sabha > District > Vidhan Sabha > 250 Wards)।
+  * डेटा विसंगति समाधान (Data Discrepancies टैब)।
+  * टास्क मीडिया रिमूव और अध्यक्ष जी को संदेशों का विषय विश्लेषण।
+* **v1.8 - v1.9:**
+  * 100-अंक फिक्स्ड प्रणाली, 5 नेतृत्व स्तर, स्लाइड-इन मेन्यू और सर्च पिकर।
 
 ---
 
-## 📜 वर्शन इतिहास (Version Changelog)
-
-* **v2.0 (Build 11) - वर्तमान:**
-  * मल्टी-प्रोफ़ाइल लॉगिन (एक ही नंबर पर लीडर पद और वार्ड कार्यकर्ता दोनों प्रोफाइल चुनकर लॉगिन करने की सुविधा)।
-  * मास्टर वार्ड संरचना (Lok Sabha > District > Vidhan Sabha > MCD Ward 250).
-  * एडमिन डेटा विसंगति समाधान (Data Discrepancies टैब — लापता नंबर, डुप्लीकेट, व अनमैप्ड वार्ड्स को 1-क्लिक में ठीक करना)।
-  * टास्क मीडिया रिमूव (गलती से अपलोड फ़ोटो/वीडियो को हटाने की सुविधा)।
-  * अध्यक्ष जी को संदेशों का विषय व टोन (Tone & Topic) विश्लेषण।
-* **v1.9 (Build 10):**
-  * स्लाइड-इन मेन्यू (बाएँ से स्लाइड होने वाला मॉडर्न मेन्यू पैनल मय इनबॉक्स काउंट व प्रोफ़ाइल)।
-  * सर्च करने योग्य पिकर (वार्ड, विधानसभा एवं अन्य सभी लिस्ट्स सर्च बार के साथ)।
-  * सुरक्षित वॉयस नोट्स (रिकॉर्डिंग स्टेट इंडिकेटर एवं सेफ सेंड हैंडलिंग)।
-  * "अब तक आपका काम" अंक टैली (जुड़े हुए दिन, शेयर, पूर्ण टास्क, अपने टास्क का विस्तृत विवरण)।
-  * एडमिन पोर्टल: 5 ग्रुप्स में विभाजित मॉडर्न नेवी साइडबार।
-  * डेटा रीसेट वर्कफ़्लो (`.github/workflows/reset-data.yml` 'DELETE' सुरक्षा कन्फर्मेशन के साथ)।
-* **v1.8 (Build 9):**
-  * 100-अंक फिक्स्ड स्कीम (100 शेयर, 100 टास्क, 100 खुद का टास्क)।
-  * अध्यक्ष जी को संदेश में फ़ोटो व वीडियो अटैचमेंट्स।
-  * संपूर्ण वैवाहिक व व्यक्तिगत प्रोफ़ाइल (DOB, शादी की सालगिरह, सोशल लिंक्स)।
-  * ऑटोमैटिक बैकएंड डिप्लॉय वर्कफ़्लो।
-* **v1.7 (Build 8):**
-  * एक ऐप में पाँच नेतृत्व स्तर (President, GS, DP, Observer, Member)।
-  * प्रेक्षक फील्ड विज़िट रिपोर्ट्स (GPS, वॉयस, मीडिया), पोस्टर्स और इनबॉक्स।
-* **v1.6 (Build 7):**
-  * मल्टी-फ़ोटो अपलोड (अधिकतम 10 फ़ोटो), स्मार्ट 2-कॉलम शेयर ग्रिड, DPCC सोशल लिंक्स।
-* **v1.5 & v1.4:**
-  * स्टार रेटिंग्स, परमानेंट रिलीज़ कीस्टोर, और डेडिकेटेड डाउनलोड लैंडिंग पेज।
-* **v1.3:**
-  * INC MCD NETWORK रिब्रांडिंग, टेलीकॉलर कॉलिंग पैनल, फुल वार्ड रिपोर्ट्स और FCM पुश नोटिफिकेशन्स।
-
----
-
-**© 2026 दिल्ली प्रदेश कांग्रेस कमेटी (DPCC) · सर्वाधिकार सुरक्षित**
+**© 2026 दिल्ली प्रदेश कांग्रेस कमेटी (DPCC) · तकनीकी संचालन: Coceptual Media**
