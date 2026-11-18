@@ -25,9 +25,9 @@ android {
     signingConfigs {
         create("release") {
             storeFile = file("release.keystore")
-            storePassword = "wardsadasya123"
+            storePassword = "WardSadasya#108"
             keyAlias = "wardsadasya"
-            keyPassword = "wardsadasya123"
+            keyPassword = "WardSadasya#108"
         }
     }
 
